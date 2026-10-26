@@ -3,7 +3,6 @@ name: build
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -23,14 +22,20 @@ jobs:
       - name: Decide version
         id: ver
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if ($env:GITHUB_REF -like 'refs/tags/v*') {
-            $v = $env:GITHUB_REF_NAME.Substring(1)
-          } else {
-            $v = "0.1.0-dev.$env:GITHUB_RUN_NUMBER"
+          # VERSION 파일의 버전으로 빌드합니다. main에 올라온 버전에 아직 릴리스가 없으면 릴리스를 만듭니다.
+          $v = (Get-Content VERSION -Raw).Trim()
+          $release = 'false'
+          if ($env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -eq 'refs/heads/main') {
+            gh release view "v$v" --repo $env:GITHUB_REPOSITORY *> $null
+            if ($LASTEXITCODE -ne 0) { $release = 'true' }
           }
           "version=$v" >> $env:GITHUB_OUTPUT
-          Write-Host "Version: $v"
+          "release=$release" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $v / new release: $release"
+          $global:LASTEXITCODE = 0
 
       - name: Build
         shell: pwsh
@@ -61,8 +66,8 @@ jobs:
           name: WiPass-${{ steps.ver.outputs.version }}
           path: dist/WiPass/
 
-      - name: Publish release (tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Publish release (new VERSION on main)
+        if: steps.ver.outputs.release == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -70,7 +75,7 @@ jobs:
           $v = "${{ steps.ver.outputs.version }}"
           $pre = if ($v -match '-') { '--prerelease' } else { '' }
           $notes = if (Test-Path "docs/release-notes/$v.md") { "docs/release-notes/$v.md" } else { $null }
-          $ghArgs = @("release", "create", "v$v", "dist/WiPass-$v.zip", "--title", "WiPass $v")
+          $ghArgs = @("release", "create", "v$v", "dist/WiPass-$v.zip", "--title", "WiPass $v", "--target", "$env:GITHUB_SHA")
           if ($pre) { $ghArgs += $pre }
           if ($notes) { $ghArgs += @("--notes-file", $notes) } else { $ghArgs += @("--notes", "WiPass $v") }
           gh @ghArgs

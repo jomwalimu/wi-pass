@@ -68,4 +68,4 @@ WiPass는 위치를 기록하거나 어디로 보내지 않습니다.
 
 - C# / .NET Framework 4.8 (WinForms), 윈도우 Native Wi-Fi API(`wlanapi.dll`) 사용
 - 빌드: `dotnet build src/WiPass/WiPass.csproj -c Release`
-- `v*` 태그를 올리면 GitHub Actions가 빌드해서 Releases에 올립니다.
+- `VERSION` 파일의 버전을 올려 main에 반영하면 GitHub Actions가 빌드해서 Releases에 올립니다.
