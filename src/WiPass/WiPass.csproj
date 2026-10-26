@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <AssemblyName>WiPass</AssemblyName>
+    <RootNamespace>WiPass</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <Deterministic>true</Deterministic>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+
+    <!-- Version: overridden by the release workflow (e.g. -p:Version=0.1.0-alpha.1) -->
+    <Version>0.1.0-dev</Version>
+    <Product>WiPass (와이패스)</Product>
+    <AssemblyTitle>WiPass - 같은 이름 학교 와이파이 자동 전환</AssemblyTitle>
+    <Description>같은 이름 학교 와이파이 자동 전환</Description>
+    <Company>jomwalimu</Company>
+    <Authors>jomwalimu</Authors>
+    <Copyright>Copyright (c) 2026 jomwalimu. MIT License.</Copyright>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Security" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Lets the project build on any machine without the .NET Framework 4.8 developer pack -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>
