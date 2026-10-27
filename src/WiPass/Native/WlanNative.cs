@@ -112,6 +112,9 @@ namespace WiPass.Native
         public static extern int WlanConnect(IntPtr hClientHandle, [In] ref Guid pInterfaceGuid, [In] ref WLAN_CONNECTION_PARAMETERS pConnectionParameters, IntPtr pReserved);
 
         [DllImport("wlanapi.dll")]
+        public static extern int WlanDisconnect(IntPtr hClientHandle, [In] ref Guid pInterfaceGuid, IntPtr pReserved);
+
+        [DllImport("wlanapi.dll")]
         public static extern int WlanRegisterNotification(IntPtr hClientHandle, uint dwNotifSource, [MarshalAs(UnmanagedType.Bool)] bool bIgnoreDuplicate,
             WlanNotificationCallback funcCallback, IntPtr pCallbackContext, IntPtr pReserved, out uint pdwPrevNotifSource);
 

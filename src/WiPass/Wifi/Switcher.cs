@@ -30,7 +30,8 @@ namespace WiPass.Wifi
     /// </summary>
     internal sealed class Switcher
     {
-        private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(25);
+        private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(20);
+        private const int MaxAttemptFailures = 3;
         private readonly WifiService wifi;
 
         public Switcher(WifiService wifi) { this.wifi = wifi; }
@@ -123,17 +124,33 @@ namespace WiPass.Wifi
             }
             Log.Info("새 설정 등록 완료");
 
-            // 6. Connect and wait for Windows to report the result
-            bool completed = false;
+            // 6. Connect and wait for Windows to report the result.
+            //    A wrong password makes Windows retry for a long time before it gives up,
+            //    so the first security (password) failure ends the wait right away.
+            bool completed = false, securityFailed = false;
             uint finalReason = 0, lastFailReason = 0;
+            int failCount = 0;
+            DateTime started = DateTime.UtcNow;
             using (var done = new ManualResetEventSlim(false))
             {
                 Action<Guid, uint, uint, string> handler = (ig, code, rc, profile) =>
                 {
                     if (ig != g) return;
                     if (profile != null && profile != req.Ssid) return;
-                    if (code == WlanNative.ACM_CONNECTION_ATTEMPT_FAIL) lastFailReason = rc;
-                    else if (code == WlanNative.ACM_CONNECTION_COMPLETE) { finalReason = rc; completed = true; done.Set(); }
+                    if (code == WlanNative.ACM_CONNECTION_ATTEMPT_FAIL)
+                    {
+                        lastFailReason = rc;
+                        failCount++;
+                        if (IsSecurityFailure(rc)) securityFailed = true;
+                        if (securityFailed || failCount >= MaxAttemptFailures) done.Set();
+                    }
+                    else if (code == WlanNative.ACM_CONNECTION_COMPLETE)
+                    {
+                        finalReason = rc;
+                        completed = true;
+                        if (IsSecurityFailure(rc)) securityFailed = true;
+                        done.Set();
+                    }
                 };
                 wifi.AcmNotification += handler;
                 try
@@ -147,15 +164,21 @@ namespace WiPass.Wifi
 
             CurrentConnection cur = wifi.GetCurrent(g);
             bool connected = cur != null && cur.State == WlanNative.STATE_CONNECTED && cur.ProfileName == req.Ssid;
-            bool ok = completed ? (finalReason == 0) : connected;
+            bool ok = completed ? (finalReason == 0) : (connected && !securityFailed);
+            int seconds = (int)(DateTime.UtcNow - started).TotalSeconds;
             if (!ok)
             {
+                // Stop Windows from retrying in the background with the wrong password.
+                wifi.Disconnect(g);
                 uint why = finalReason != 0 ? finalReason : lastFailReason;
-                Log.Warn("접속 실패: " + (completed ? "" : "시간 초과 ") + WifiService.ReasonText(why));
                 string detail = WifiService.ReasonText(why);
+                Log.Warn("접속 실패(" + seconds + "초, " + (securityFailed ? "비밀번호 오류 추정" : completed ? "완료 보고" : "시간 초과") + "): " + detail);
+                if (securityFailed)
+                    return Fail(res, req.PlaceName + " 비밀번호가 맞지 않습니다. 설정에서 이 장소의 비밀번호를 확인해 주세요.");
                 return Fail(res, req.PlaceName + " 비밀번호로 접속하지 못했습니다. 비밀번호가 맞는지, 지금 " + req.PlaceName + "에 있는지 확인해 주세요."
                                  + (detail.Length > 0 ? " (" + detail + ")" : ""));
             }
+            Log.Info("접속까지 " + seconds + "초");
 
             // 7. Remember which access points belong to this place (used for automatic detection)
             Thread.Sleep(1500);
@@ -173,6 +196,15 @@ namespace WiPass.Wifi
             res.Success = true;
             res.Message = req.PlaceName + " 와이파이에 연결했습니다.";
             return res;
+        }
+
+        /// <summary>
+        /// Reason codes in the 802.11 security range (L2_REASON_CODE_DOT11_SECURITY_BASE, 0x40000–0x4FFFF)
+        /// mean the key exchange failed — in practice, a wrong password.
+        /// </summary>
+        private static bool IsSecurityFailure(uint reason)
+        {
+            return reason >= 0x40000 && reason < 0x50000;
         }
 
         private static SwitchResult Fail(SwitchResult res, string message)

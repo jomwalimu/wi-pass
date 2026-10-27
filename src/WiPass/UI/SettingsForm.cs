@@ -23,11 +23,9 @@ namespace WiPass.UI
         private Label lblSecurity;
         private LinkLabel lnkLocation;
         private ListView lvPlaces;
-        private TextBox txtName;
-        private TextBox txtPassword;
-        private CheckBox chkShow;
-        private Button btnAdd, btnUpdate, btnDelete;
+        private Button btnAdd, btnEdit, btnDelete;
         private Timer rescanTimer;
+        private bool dirty;
 
         public AppSettings Result { get; private set; }
 
@@ -57,6 +55,18 @@ namespace WiPass.UI
             UpdateSecurityLabel();
 
             Shown += (s, e) => RefreshNetworks(true);
+            FormClosing += (s, e) =>
+            {
+                // Closing without saving after changes: make sure that is what the user wants.
+                bool changed = dirty || cboSsid.Text.Trim() != (original.Ssid ?? "");
+                if (DialogResult != DialogResult.OK && changed &&
+                    MessageBox.Show(this, "바꾼 내용을 저장하지 않고 닫을까요?", Text,
+                        MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                {
+                    e.Cancel = true;
+                    DialogResult = DialogResult.None;
+                }
+            };
             FormClosed += (s, e) => { if (rescanTimer != null) rescanTimer.Dispose(); };
         }
 
@@ -115,57 +125,53 @@ namespace WiPass.UI
 
             // 2. places
             root.Controls.Add(MakeLabel("2. 장소와 비밀번호", true, SystemColors.ControlText));
-            root.Controls.Add(MakeLabel("장소 이름(예: ○○초)과 그곳의 와이파이 비밀번호를 하나씩 추가하세요.", false, SystemColors.GrayText));
+            root.Controls.Add(MakeLabel("[장소 추가]를 눌러 장소 이름(예: ○○초)과 그곳의 와이파이 비밀번호를 넣으세요.", false, SystemColors.GrayText));
 
+            var placeRow = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, Margin = new Padding(0, S(4), 0, S(2)) };
             lvPlaces = new ListView
             {
                 View = View.Details,
                 FullRowSelect = true,
                 HideSelection = false,
                 MultiSelect = false,
-                Width = S(440),
-                Height = S(150),
+                Width = S(360),
+                Height = S(160),
                 HeaderStyle = ColumnHeaderStyle.Nonclickable,
-                Margin = new Padding(0, S(4), 0, S(4))
+                Margin = new Padding(0, 0, S(8), 0)
             };
-            lvPlaces.Columns.Add("장소", S(200));
-            lvPlaces.Columns.Add("비밀번호", S(90));
-            lvPlaces.Columns.Add("기억한 공유기", S(120));
+            lvPlaces.Columns.Add("장소", S(170));
+            lvPlaces.Columns.Add("비밀번호", S(80));
+            lvPlaces.Columns.Add("기억한 공유기", S(100));
             lvPlaces.SelectedIndexChanged += (s, e) => OnPlaceSelected();
-            root.Controls.Add(lvPlaces);
+            lvPlaces.DoubleClick += (s, e) => EditPlace();
+            lvPlaces.KeyDown += (s, e) =>
+            {
+                if (e.KeyCode == Keys.Delete) { DeletePlace(); e.Handled = true; }
+                else if (e.KeyCode == Keys.Enter) { EditPlace(); e.Handled = true; }
+            };
+            placeRow.Controls.Add(lvPlaces, 0, 0);
 
-            var grid = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, Margin = new Padding(0) };
-            grid.Controls.Add(MakeLabel("장소 이름", false, SystemColors.ControlText, true), 0, 0);
-            txtName = new TextBox { Width = S(300), MaxLength = 40 };
-            grid.Controls.Add(txtName, 1, 0);
-            grid.Controls.Add(MakeLabel("비밀번호", false, SystemColors.ControlText, true), 0, 1);
-            txtPassword = new TextBox { Width = S(300), UseSystemPasswordChar = true, MaxLength = 64 };
-            grid.Controls.Add(txtPassword, 1, 1);
-            chkShow = new CheckBox { Text = "비밀번호 보기", AutoSize = true };
-            chkShow.CheckedChanged += (s, e) => txtPassword.UseSystemPasswordChar = !chkShow.Checked;
-            grid.Controls.Add(chkShow, 1, 2);
-            root.Controls.Add(grid);
-
-            var placeButtons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, S(2), 0, 0) };
-            btnAdd = new Button { Text = "추가", AutoSize = true };
+            var side = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = new Padding(0) };
+            btnAdd = new Button { Text = "＋ 장소 추가", AutoSize = true, MinimumSize = new Size(S(110), S(30)) };
             btnAdd.Click += (s, e) => AddPlace();
-            btnUpdate = new Button { Text = "선택한 장소 수정", AutoSize = true, Enabled = false };
-            btnUpdate.Click += (s, e) => UpdatePlace();
-            btnDelete = new Button { Text = "삭제", AutoSize = true, Enabled = false };
+            btnEdit = new Button { Text = "수정", AutoSize = true, MinimumSize = new Size(S(110), S(30)), Enabled = false };
+            btnEdit.Click += (s, e) => EditPlace();
+            btnDelete = new Button { Text = "삭제", AutoSize = true, MinimumSize = new Size(S(110), S(30)), Enabled = false };
             btnDelete.Click += (s, e) => DeletePlace();
-            placeButtons.Controls.Add(btnAdd);
-            placeButtons.Controls.Add(btnUpdate);
-            placeButtons.Controls.Add(btnDelete);
-            root.Controls.Add(placeButtons);
+            side.Controls.Add(btnAdd);
+            side.Controls.Add(btnEdit);
+            side.Controls.Add(btnDelete);
+            placeRow.Controls.Add(side, 1, 0);
+            root.Controls.Add(placeRow);
 
-            root.Controls.Add(MakeLabel("수정할 때 비밀번호 칸을 비워 두면 기존 비밀번호가 그대로 유지됩니다.", false, SystemColors.GrayText));
+            root.Controls.Add(MakeLabel("목록에서 장소를 두 번 클릭해도 수정할 수 있습니다.", false, SystemColors.GrayText));
             root.Controls.Add(MakeLabel("비밀번호는 이 PC에만 암호화되어 저장되며, 어디로도 전송되지 않습니다.", false, Color.FromArgb(34, 120, 70)));
 
             root.Controls.Add(Spacer(10));
 
             var bottom = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.RightToLeft, Dock = DockStyle.Fill, WrapContents = false };
             var btnCancel = new Button { Text = "취소", AutoSize = true, DialogResult = DialogResult.Cancel, MinimumSize = new Size(S(90), 0) };
-            var btnSave = new Button { Text = "저장", AutoSize = true, MinimumSize = new Size(S(90), 0) };
+            var btnSave = new Button { Text = "저장하고 닫기", AutoSize = true, MinimumSize = new Size(S(90), 0) };
             btnSave.Click += (s, e) => Save();
             bottom.Controls.Add(btnCancel);
             bottom.Controls.Add(btnSave);
@@ -311,13 +317,15 @@ namespace WiPass.UI
         private void OnPlaceSelected()
         {
             Place p = SelectedPlace;
-            btnUpdate.Enabled = p != null;
+            btnEdit.Enabled = p != null;
             btnDelete.Enabled = p != null;
-            if (p != null)
-            {
-                txtName.Text = p.Name;
-                txtPassword.Text = "";
-            }
+        }
+
+        private void SelectPlace(Place place)
+        {
+            foreach (ListViewItem item in lvPlaces.Items)
+                if (item.Tag == place) { item.Selected = true; item.Focused = true; item.EnsureVisible(); }
+            lvPlaces.Focus();
         }
 
         private bool NameTaken(string name, Place except)
@@ -329,42 +337,36 @@ namespace WiPass.UI
 
         private void AddPlace()
         {
-            string name = txtName.Text.Trim();
-            string pw = txtPassword.Text;
-            if (name.Length == 0) { Warn("장소 이름을 입력해 주세요."); txtName.Focus(); return; }
-            if (NameTaken(name, null)) { Warn("같은 이름의 장소가 이미 있습니다."); txtName.Focus(); return; }
-            string err = ProfileBuilder.ValidatePassword(pw);
-            if (err != null) { Warn(err); txtPassword.Focus(); return; }
-
-            work.Places.Add(new Place
+            using (var dlg = new PlaceDialog(null, n => NameTaken(n, null)))
             {
-                Id = Guid.NewGuid().ToString("N"),
-                Name = name,
-                ProtectedPassword = SecretStore.Protect(pw),
-                Bssids = new List<string>()
-            });
-            txtName.Text = "";
-            txtPassword.Text = "";
-            LoadPlaces();
-            txtName.Focus();
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                var place = new Place
+                {
+                    Id = Guid.NewGuid().ToString("N"),
+                    Name = dlg.PlaceName,
+                    ProtectedPassword = SecretStore.Protect(dlg.Password),
+                    Bssids = new List<string>()
+                };
+                work.Places.Add(place);
+                dirty = true;
+                LoadPlaces();
+                SelectPlace(place);
+            }
         }
 
-        private void UpdatePlace()
+        private void EditPlace()
         {
             Place p = SelectedPlace;
             if (p == null) return;
-            string name = txtName.Text.Trim();
-            if (name.Length == 0) { Warn("장소 이름을 입력해 주세요."); return; }
-            if (NameTaken(name, p)) { Warn("같은 이름의 장소가 이미 있습니다."); return; }
-            if (txtPassword.Text.Length > 0)
+            using (var dlg = new PlaceDialog(p.Name, n => NameTaken(n, p)))
             {
-                string err = ProfileBuilder.ValidatePassword(txtPassword.Text);
-                if (err != null) { Warn(err); txtPassword.Focus(); return; }
-                p.ProtectedPassword = SecretStore.Protect(txtPassword.Text);
+                if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                p.Name = dlg.PlaceName;
+                if (dlg.Password.Length > 0) p.ProtectedPassword = SecretStore.Protect(dlg.Password);
+                dirty = true;
+                LoadPlaces();
+                SelectPlace(p);
             }
-            p.Name = name;
-            txtPassword.Text = "";
-            LoadPlaces();
         }
 
         private void DeletePlace()
@@ -374,8 +376,7 @@ namespace WiPass.UI
             if (MessageBox.Show(this, "'" + p.Name + "' 장소를 삭제할까요?", Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             work.Places.Remove(p);
             if (work.CurrentPlaceId == p.Id) work.CurrentPlaceId = null;
-            txtName.Text = "";
-            txtPassword.Text = "";
+            dirty = true;
             LoadPlaces();
         }
 
@@ -385,18 +386,6 @@ namespace WiPass.UI
         {
             string ssid = cboSsid.Text.Trim();
             if (ssid.Length == 0) { Warn("학교 와이파이 이름을 고르거나 입력해 주세요."); cboSsid.Focus(); return; }
-
-            // An unsaved entry in the boxes is a common slip: offer to add it.
-            if (SelectedPlace == null && txtName.Text.Trim().Length > 0)
-            {
-                if (MessageBox.Show(this, "입력 중인 장소 '" + txtName.Text.Trim() + "'을(를) 추가할까요?", Text,
-                        MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
-                {
-                    int before = work.Places.Count;
-                    AddPlace();
-                    if (work.Places.Count == before) return;
-                }
-            }
 
             VisibleNetwork n = FindVisible(ssid);
             if (n != null)
@@ -419,7 +408,7 @@ namespace WiPass.UI
                         MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             }
 
-            if (work.Places.Count == 0) { Warn("장소를 하나 이상 추가해 주세요."); txtName.Focus(); return; }
+            if (work.Places.Count == 0) { Warn("[장소 추가]를 눌러 장소를 하나 이상 추가해 주세요."); btnAdd.Focus(); return; }
             foreach (var p in work.Places)
                 if (!p.HasPassword) { Warn("'" + p.Name + "'의 비밀번호를 입력해 주세요."); return; }
 

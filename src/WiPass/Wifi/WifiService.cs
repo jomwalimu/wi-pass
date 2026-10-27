@@ -297,6 +297,12 @@ namespace WiPass.Wifi
             return WlanNative.WlanConnect(handle, ref itf, ref prm, IntPtr.Zero);
         }
 
+        public void Disconnect(Guid itf)
+        {
+            int r = WlanNative.WlanDisconnect(handle, ref itf, IntPtr.Zero);
+            if (r != 0) Log.Info("연결 끊기 요청 실패: " + ErrorText(r));
+        }
+
         // ---------------------------------------------------------------- helpers
 
         public static string ErrorText(int code)
