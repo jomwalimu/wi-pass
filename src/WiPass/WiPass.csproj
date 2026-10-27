@@ -16,7 +16,7 @@
     <!-- Version: overridden by the release workflow (e.g. -p:Version=0.1.0-alpha.1) -->
     <Version>0.1.0-dev</Version>
     <Product>WiPass (와이패스)</Product>
-    <AssemblyTitle>WiPass - 같은 이름 학교 와이파이 자동 전환</AssemblyTitle>
+    <AssemblyTitle>와이패스 (WiPass)</AssemblyTitle>
     <Description>같은 이름 학교 와이파이 자동 전환</Description>
     <Company>jomwalimu</Company>
     <Authors>jomwalimu</Authors>

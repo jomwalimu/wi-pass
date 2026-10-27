@@ -292,13 +292,14 @@ namespace WiPass.UI
                 autoRetryAfter = DateTime.MinValue;
                 lastFailureAt = null;
 
-                string msg = automatic ? o.PlaceName + " 와이파이로 자동 전환했습니다." : o.Success.Message;
+                // Short lines: the place goes in the title so the message does not wrap mid-word.
+                string msg = automatic ? "장소에 맞게 자동으로 전환했습니다." : "와이파이에 연결했습니다.";
                 if (o.HotspotTried)
                 {
                     hotspotOn = o.HotspotError == null;
                     msg += o.HotspotError == null ? "\r\n노트북 핫스팟도 켰습니다." : "\r\n핫스팟은 켜지 못했습니다: " + o.HotspotError;
                 }
-                Balloon("와이파이 연결됨", msg, ToolTipIcon.Info);
+                Balloon(o.PlaceName + " 연결됨", msg, ToolTipIcon.Info);
                 RefreshStatus();
             }
             else

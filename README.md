@@ -10,11 +10,9 @@
 <table>
   <tr>
     <td align="center"><img src="docs/images/settings.png" alt="WiPass 설정 창" width="460"><br><sub>설정 창 — 와이파이 이름, 장소·비밀번호, 옵션</sub></td>
-    <td align="center" valign="top"><img src="docs/images/tray-menu.png" alt="작업표시줄 아이콘 메뉴" width="300"><br><sub>작업표시줄 아이콘 메뉴</sub></td>
+    <td align="center" valign="top"><img src="docs/images/tray-menu.png" alt="작업표시줄 아이콘 메뉴" width="300"><br><sub>작업표시줄 아이콘 메뉴</sub><br><br><img src="docs/images/auto-switch.png" alt="자동 전환 알림" width="360"><br><sub>장소에 도착하면 자동 전환 (핫스팟 옵션 켬)</sub></td>
   </tr>
 </table>
-
-<!-- 자동 전환 알림 스크린샷: 추가 예정 (docs/images/auto-switch.png) -->
 
 ## 주요 기능
 
