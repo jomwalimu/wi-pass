@@ -7,7 +7,14 @@
 
 > ⚠️ **지금은 시험판(알파)입니다.** 사용해 보시고 [문의 게시판](https://github.com/jomwalimu/wi-pass/issues)에 의견을 남겨 주세요. → [개발 계획](docs/PLAN.md)
 
-<!-- 스크린샷: docs/images/ 에 추가 예정 (설정 창, 작업표시줄 메뉴, 자동 전환 알림) -->
+<table>
+  <tr>
+    <td align="center"><img src="docs/images/settings.png" alt="WiPass 설정 창" width="460"><br><sub>설정 창 — 와이파이 이름, 장소·비밀번호, 옵션</sub></td>
+    <td align="center" valign="top"><img src="docs/images/tray-menu.png" alt="작업표시줄 아이콘 메뉴" width="300"><br><sub>작업표시줄 아이콘 메뉴</sub></td>
+  </tr>
+</table>
+
+<!-- 자동 전환 알림 스크린샷: 추가 예정 (docs/images/auto-switch.png) -->
 
 ## 주요 기능
 
