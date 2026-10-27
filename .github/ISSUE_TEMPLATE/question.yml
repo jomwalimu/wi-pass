@@ -1,0 +1,24 @@
+name: ❓ 사용 문의
+description: 설치나 사용 방법이 궁금할 때 물어봐 주세요.
+title: "[문의] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        먼저 [README의 자주 묻는 질문](https://github.com/jomwalimu/wi-pass#자주-묻는-질문)을 확인해 보세요.
+        ⚠️ **와이파이 비밀번호는 절대 적지 마세요.**
+
+  - type: textarea
+    id: question
+    attributes:
+      label: 궁금한 점
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: WiPass 버전 (알면)
+    validations:
+      required: false

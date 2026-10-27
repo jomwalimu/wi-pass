@@ -1,0 +1,85 @@
+name: 🐞 문제 신고
+description: WiPass가 제대로 동작하지 않을 때 알려 주세요.
+title: "[문제] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        신고해 주셔서 고맙습니다. 아래 내용을 채워 주시면 원인을 빨리 찾을 수 있습니다.
+        ⚠️ **와이파이 비밀번호는 절대 적지 마세요.** 이 게시판은 누구나 볼 수 있습니다.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 어떤 문제가 있나요?
+      description: 무엇을 했을 때, 무엇이 일어났는지 적어 주세요.
+      placeholder: 예) 왕북초에 도착해 노트북을 열었는데 자동으로 연결되지 않고 아이콘이 빨간색이 됩니다.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 원래 기대한 동작
+      placeholder: 예) 왕북초 비밀번호로 자동 접속
+    validations:
+      required: false
+
+  - type: dropdown
+    id: situation
+    attributes:
+      label: 어떤 상황이었나요?
+      options:
+        - 장소에 도착했을 때 자동 전환
+        - 메뉴에서 장소를 직접 골랐을 때
+        - 설정 창
+        - 핫스팟
+        - 설치 / 제거 / 자동 실행
+        - 기타
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: WiPass 버전
+      description: 작업표시줄 아이콘 → 도움말 → WiPass 정보에서 확인할 수 있습니다.
+      placeholder: 예) 0.3.0-alpha.1
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: 윈도우 버전과 노트북 기종
+      placeholder: 예) Windows 11 24H2 / 삼성 갤럭시북4
+    validations:
+      required: false
+
+  - type: input
+    id: region
+    attributes:
+      label: 소속 교육청 (선택)
+      description: 교육청마다 무선망 방식이 달라 원인을 찾는 데 도움이 됩니다.
+      placeholder: 예) 전북특별자치도교육청
+    validations:
+      required: false
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: 진단 정보 파일
+      description: |
+        작업표시줄 아이콘 → 도움말 → **문의용 진단 정보 저장**으로 만든 파일을 여기로 끌어다 놓아 주세요.
+        비밀번호는 들어 있지 않지만, 장소 이름이 들어 있을 수 있으니 올리기 전에 한 번 열어 확인해 주세요.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 확인
+      options:
+        - label: 이 글과 첨부 파일에 와이파이 비밀번호가 들어 있지 않습니다.
+          required: true

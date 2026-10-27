@@ -1,0 +1,27 @@
+name: 💡 기능 제안
+description: 이런 기능이 있으면 좋겠다는 의견을 남겨 주세요.
+title: "[제안] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: 어떤 점이 불편하거나 필요한가요?
+      placeholder: 예) 학교를 옮길 때마다 프린터도 바꿔야 해서 번거롭습니다.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: 어떻게 되면 좋을까요?
+      placeholder: 예) 장소마다 기본 프린터를 정해 두면 같이 바뀌었으면 좋겠습니다.
+    validations:
+      required: false
+
+  - type: input
+    id: region
+    attributes:
+      label: 소속 교육청 (선택)
+    validations:
+      required: false

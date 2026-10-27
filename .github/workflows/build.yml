@@ -58,13 +58,49 @@ jobs:
           Copy-Item "$out/WiPass.exe" dist/WiPass/
           if (Test-Path "$out/WiPass.exe.config") { Copy-Item "$out/WiPass.exe.config" dist/WiPass/ }
           Copy-Item README.md, LICENSE dist/WiPass/
-          Compress-Archive -Path dist/WiPass/* -DestinationPath "dist/WiPass-$v.zip" -Force
+          Compress-Archive -Path dist/WiPass/* -DestinationPath "dist/WiPass-$v-portable.zip" -Force
+          Get-ChildItem dist
+
+      - name: Installer
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          $numeric = ($v -split '-')[0]
+          $iscc = Get-Command iscc.exe -ErrorAction SilentlyContinue
+          if (-not $iscc) {
+            $candidates = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe")
+            $found = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if (-not $found) {
+              choco install innosetup --no-progress -y | Out-Null
+              $found = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+            }
+            $isccPath = $found
+          } else { $isccPath = $iscc.Source }
+          if (-not $isccPath) { Write-Host "::error::Inno Setup not found"; exit 1 }
+          Write-Host "ISCC: $isccPath"
+
+          # Korean messages: use the bundled file if this Inno Setup version has it, otherwise fetch it.
+          $innoDir = Split-Path $isccPath
+          if (-not (Test-Path "$innoDir\Languages\Korean.isl")) {
+            $urls = @(
+              "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Korean.isl",
+              "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/Korean.isl")
+            foreach ($u in $urls) {
+              try { Invoke-WebRequest $u -OutFile installer/Korean.isl -ErrorAction Stop; Write-Host "Korean.isl from $u"; break } catch { }
+            }
+            if (-not (Test-Path installer/Korean.isl)) { Write-Host "::error::Korean.isl not available"; exit 1 }
+          }
+
+          & $isccPath "/DMyAppVersion=$v" "/DMyAppVersionNumeric=$numeric" installer/wipass.iss
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Installer build failed"; exit 1 }
           Get-ChildItem dist
 
       - uses: actions/upload-artifact@v4
         with:
           name: WiPass-${{ steps.ver.outputs.version }}
-          path: dist/WiPass/
+          path: |
+            dist/WiPass-Setup-*.exe
+            dist/WiPass-*-portable.zip
 
       - name: Publish release (new VERSION on main)
         if: steps.ver.outputs.release == 'true'
@@ -75,7 +111,7 @@ jobs:
           $v = "${{ steps.ver.outputs.version }}"
           $pre = if ($v -match '-') { '--prerelease' } else { '' }
           $notes = if (Test-Path "docs/release-notes/$v.md") { "docs/release-notes/$v.md" } else { $null }
-          $ghArgs = @("release", "create", "v$v", "dist/WiPass-$v.zip", "--title", "WiPass $v", "--target", "$env:GITHUB_SHA")
+          $ghArgs = @("release", "create", "v$v", "dist/WiPass-Setup-$v.exe", "dist/WiPass-$v-portable.zip", "--title", "WiPass $v", "--target", "$env:GITHUB_SHA")
           if ($pre) { $ghArgs += $pre }
           if ($notes) { $ghArgs += @("--notes-file", $notes) } else { $ghArgs += @("--notes", "WiPass $v") }
           gh @ghArgs

@@ -86,7 +86,9 @@ namespace WiPass.UI
             evaluateSoon = new Timer();
             evaluateSoon.Tick += (s, e) => { evaluateSoon.Stop(); Evaluate(); };
 
-            if (settings.StartWithWindows) StartupManager.Apply(true);
+            // Keep the startup entry in line with the setting and the current exe location
+            // (e.g. after moving from a portable folder to the installed one).
+            StartupManager.Apply(settings.StartWithWindows);
 
             Log.Info("WiPass " + AppInfo.Version + " 시작 (자동 전환 " + OnOff(settings.AutoSwitch) + ", 핫스팟 " + OnOff(settings.AutoHotspot) + ")");
             Post(() =>
