@@ -13,7 +13,7 @@ namespace WiPass.UI
     /// </summary>
     internal static class Diagnostics
     {
-        public static string Build(WifiService wifi, AppSettings settings)
+        public static string Build(WifiService wifi, AppSettings settings, bool hotspotAvailable)
         {
             var sb = new StringBuilder();
             sb.AppendLine("=== WiPass 진단 정보 ===");
@@ -31,6 +31,11 @@ namespace WiPass.UI
                 sb.AppendLine("  장소" + (i++) + ": 비밀번호 " + (p.HasPassword ? "있음" : "없음") + ", 기억한 공유기 " + p.Bssids.Count + "개" +
                               (p.Id == settings.CurrentPlaceId ? " (최근 연결)" : ""));
             sb.AppendLine("보안 방식 템플릿: " + (string.IsNullOrEmpty(settings.ProfileTemplate) ? "없음" : "있음"));
+            sb.AppendLine("자동 전환: " + (settings.AutoSwitch ? "켜짐" : "꺼짐") +
+                          " / 윈도우 시작 시 실행: " + (settings.StartWithWindows ? "켜짐" : "꺼짐") +
+                          " / 핫스팟 자동 켜기: " + (settings.AutoHotspot ? "켜짐" : "꺼짐") +
+                          " (핫스팟 기능 " + (hotspotAvailable ? "사용 가능" : "사용 불가") + ")");
+            sb.AppendLine("임시 폴더에서 실행: " + (StartupManager.RunningFromTemp ? "예" : "아니오"));
             sb.AppendLine();
 
             sb.AppendLine("[무선랜]");

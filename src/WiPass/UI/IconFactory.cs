@@ -16,6 +16,22 @@ namespace WiPass.UI
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool DestroyIcon(IntPtr hIcon);
 
+        private static Icon appIcon;
+
+        /// <summary>The program icon (embedded in WiPass.exe), for windows.</summary>
+        public static Icon AppIcon
+        {
+            get
+            {
+                if (appIcon == null)
+                {
+                    try { appIcon = Icon.ExtractAssociatedIcon(System.Windows.Forms.Application.ExecutablePath); }
+                    catch { appIcon = Get(TrayState.Connected); }
+                }
+                return appIcon;
+            }
+        }
+
         public static Icon Get(TrayState state)
         {
             Icon icon;

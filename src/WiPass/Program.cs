@@ -27,6 +27,14 @@ namespace WiPass
                 Application.ThreadException += (s, e) => Log.Error("처리되지 않은 오류: " + e.Exception);
                 AppDomain.CurrentDomain.UnhandledException += (s, e) => Log.Error("처리되지 않은 오류: " + e.ExceptionObject);
 
+                if (StartupManager.RunningFromTemp)
+                {
+                    MessageBox.Show("압축 파일 안에서 바로 실행하신 것 같습니다.\r\n" +
+                                    "이대로도 쓸 수 있지만, '윈도우 시작 시 자동 실행'이 되려면\r\n" +
+                                    "압축을 원하는 폴더에 푼 다음 그 폴더의 WiPass.exe를 실행해 주세요.",
+                        AppInfo.Name, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+
                 WifiService wifi;
                 try
                 {

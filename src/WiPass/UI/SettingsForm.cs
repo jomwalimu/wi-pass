@@ -26,20 +26,24 @@ namespace WiPass.UI
         private Button btnAdd, btnEdit, btnDelete;
         private Timer rescanTimer;
         private bool dirty;
+        private readonly bool hotspotAvailable;
+        private CheckBox chkAuto, chkStartup, chkHotspot;
 
         public AppSettings Result { get; private set; }
 
-        public SettingsForm(WifiService wifi, AppSettings settings, bool firstRun)
+        public SettingsForm(WifiService wifi, AppSettings settings, bool firstRun, bool hotspotAvailable)
         {
             this.wifi = wifi;
             this.original = settings;
             this.work = settings.Clone();
             this.firstRun = firstRun;
+            this.hotspotAvailable = hotspotAvailable;
 
             Font = new Font("Malgun Gothic", 9.5f);
             using (Graphics g = CreateGraphics()) scale = g.DpiX / 96f;
 
             Text = AppInfo.DisplayName + " 설정";
+            Icon = IconFactory.AppIcon;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
@@ -58,7 +62,9 @@ namespace WiPass.UI
             FormClosing += (s, e) =>
             {
                 // Closing without saving after changes: make sure that is what the user wants.
-                bool changed = dirty || cboSsid.Text.Trim() != (original.Ssid ?? "");
+                bool changed = dirty || cboSsid.Text.Trim() != (original.Ssid ?? "") ||
+                               chkAuto.Checked != original.AutoSwitch || chkStartup.Checked != original.StartWithWindows ||
+                               chkHotspot.Checked != original.AutoHotspot;
                 if (DialogResult != DialogResult.OK && changed &&
                     MessageBox.Show(this, "바꾼 내용을 저장하지 않고 닫을까요?", Text,
                         MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
@@ -169,6 +175,26 @@ namespace WiPass.UI
 
             root.Controls.Add(Spacer(10));
 
+            // 3. options
+            root.Controls.Add(MakeLabel("3. 옵션", true, SystemColors.ControlText));
+            chkAuto = MakeCheck("장소에 도착하면 자동으로 전환", work.AutoSwitch);
+            root.Controls.Add(chkAuto);
+            root.Controls.Add(Indented(MakeLabel("주변 공유기를 보고 어느 장소인지 판단해 그 장소 비밀번호로 접속합니다.", false, SystemColors.GrayText)));
+            chkStartup = MakeCheck("윈도우를 시작할 때 WiPass 자동 실행", work.StartWithWindows);
+            root.Controls.Add(chkStartup);
+            chkHotspot = MakeCheck("학교 와이파이에 연결되면 노트북 핫스팟 켜기 (스마트폰 연결용)", work.AutoHotspot);
+            chkHotspot.Enabled = hotspotAvailable;
+            root.Controls.Add(chkHotspot);
+            root.Controls.Add(Indented(MakeLabel(hotspotAvailable
+                ? "스마트폰을 노트북 핫스팟에 연결해 두면 어느 장소에서든 자동으로 붙어 데이터를 아낄 수 있습니다.\r\n" +
+                  "학교·기관의 무선망 보안 지침을 먼저 확인해 주세요."
+                : "이 PC에서는 윈도우 모바일 핫스팟 기능을 쓸 수 없습니다.", false, SystemColors.GrayText)));
+            var lnkHotspot = new LinkLabel { AutoSize = true, Text = "핫스팟 이름·비밀번호 정하기 (윈도우 모바일 핫스팟 설정 열기)", Enabled = hotspotAvailable };
+            lnkHotspot.LinkClicked += (s, e) => { try { Process.Start("ms-settings:network-mobilehotspot"); } catch { } };
+            root.Controls.Add(Indented(lnkHotspot));
+
+            root.Controls.Add(Spacer(10));
+
             var bottom = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.RightToLeft, Dock = DockStyle.Fill, WrapContents = false };
             var btnCancel = new Button { Text = "취소", AutoSize = true, DialogResult = DialogResult.Cancel, MinimumSize = new Size(S(90), 0) };
             var btnSave = new Button { Text = "저장하고 닫기", AutoSize = true, MinimumSize = new Size(S(90), 0) };
@@ -177,6 +203,17 @@ namespace WiPass.UI
             bottom.Controls.Add(btnSave);
             root.Controls.Add(bottom);
             CancelButton = btnCancel;
+        }
+
+        private CheckBox MakeCheck(string text, bool value)
+        {
+            return new CheckBox { Text = text, AutoSize = true, Checked = value, Margin = new Padding(0, S(4), 0, 0) };
+        }
+
+        private Control Indented(Control c)
+        {
+            c.Margin = new Padding(S(18), c.Margin.Top, c.Margin.Right, c.Margin.Bottom);
+            return c;
         }
 
         private Label MakeLabel(string text, bool bold, Color color, bool middle = false)
@@ -423,6 +460,9 @@ namespace WiPass.UI
             if (string.IsNullOrEmpty(original.Ssid) || ssid != original.Ssid) work.ProfileTemplate = null;
 
             work.Ssid = ssid;
+            work.AutoSwitch = chkAuto.Checked;
+            work.StartWithWindows = chkStartup.Checked;
+            work.AutoHotspot = chkHotspot.Checked && hotspotAvailable;
             Result = work;
             DialogResult = DialogResult.OK;
             Close();

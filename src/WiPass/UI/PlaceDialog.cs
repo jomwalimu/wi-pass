@@ -28,6 +28,7 @@ namespace WiPass.UI
             Font = new Font("Malgun Gothic", 9.5f);
             using (Graphics g = CreateGraphics()) scale = g.DpiX / 96f;
             Text = editing ? "장소 수정" : "장소 추가";
+            Icon = IconFactory.AppIcon;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;

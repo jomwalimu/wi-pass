@@ -46,6 +46,19 @@ namespace WiPass.Core
         /// <summary>Profile XML copied from the user's own saved network, password removed.</summary>
         [DataMember(Order = 5)] public string ProfileTemplate;
 
+        // Options are nullable so that settings files from older versions get the right defaults
+        // (the JSON serializer does not run field initializers).
+        [DataMember(Order = 6)] public bool? AutoSwitchOption;
+        [DataMember(Order = 7)] public bool? StartWithWindowsOption;
+        [DataMember(Order = 8)] public bool? AutoHotspotOption;
+
+        /// <summary>Switch automatically when arriving at a place. Default: on.</summary>
+        public bool AutoSwitch { get { return AutoSwitchOption ?? true; } set { AutoSwitchOption = value; } }
+        /// <summary>Start WiPass when Windows starts. Default: on.</summary>
+        public bool StartWithWindows { get { return StartWithWindowsOption ?? true; } set { StartWithWindowsOption = value; } }
+        /// <summary>Turn on the laptop's mobile hotspot when connected. Default: off.</summary>
+        public bool AutoHotspot { get { return AutoHotspotOption ?? false; } set { AutoHotspotOption = value; } }
+
         public bool IsConfigured
         {
             get { return !string.IsNullOrEmpty(Ssid) && Places != null && Places.Count > 0; }
@@ -65,6 +78,32 @@ namespace WiPass.Core
             foreach (var p in Places)
                 if (p.Bssids != null && p.Bssids.Contains(bssid)) return p;
             return null;
+        }
+
+        /// <summary>
+        /// Places to try, best guess first: places that know more of the visible access points come first,
+        /// then the most recently used. Places without a password are left out.
+        /// </summary>
+        public List<Place> RankPlaces(ICollection<string> visibleBssids)
+        {
+            var ranked = new List<KeyValuePair<Place, int>>();
+            foreach (var p in Places)
+            {
+                if (!p.HasPassword) continue;
+                int hits = 0;
+                if (p.Bssids != null && visibleBssids != null)
+                    foreach (var b in p.Bssids) if (visibleBssids.Contains(b)) hits++;
+                ranked.Add(new KeyValuePair<Place, int>(p, hits));
+            }
+            ranked.Sort((a, b) =>
+            {
+                int c = b.Value.CompareTo(a.Value);
+                if (c != 0) return c;
+                return string.CompareOrdinal(b.Key.LastUsedUtc ?? "", a.Key.LastUsedUtc ?? "");
+            });
+            var result = new List<Place>();
+            foreach (var kv in ranked) result.Add(kv.Key);
+            return result;
         }
 
         /// <summary>Remember access points for a place; an access point belongs to one place only.</summary>
@@ -92,6 +131,9 @@ namespace WiPass.Core
                 Ssid = Ssid,
                 CurrentPlaceId = CurrentPlaceId,
                 ProfileTemplate = ProfileTemplate,
+                AutoSwitchOption = AutoSwitchOption,
+                StartWithWindowsOption = StartWithWindowsOption,
+                AutoHotspotOption = AutoHotspotOption,
                 Places = new List<Place>()
             };
             if (Places != null) foreach (var p in Places) c.Places.Add(p.Clone());
