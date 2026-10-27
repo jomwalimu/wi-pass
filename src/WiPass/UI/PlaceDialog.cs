@@ -51,7 +51,15 @@ namespace WiPass.UI
             root.Controls.Add(Hint("예: ○○초, 본교, 분교"), 1, 1);
 
             root.Controls.Add(Caption("비밀번호"), 0, 2);
-            txtPassword = new TextBox { Width = S(260), MaxLength = 64, UseSystemPasswordChar = true };
+            // Passwords are Latin letters, digits and symbols: Malgun Gothic spaces those unevenly,
+            // so the password box uses the Windows UI Latin font instead.
+            txtPassword = new TextBox
+            {
+                Width = S(260),
+                MaxLength = 64,
+                UseSystemPasswordChar = true,
+                Font = new Font("Segoe UI", 10f)
+            };
             root.Controls.Add(txtPassword, 1, 2);
 
             var chkShow = new CheckBox { Text = "비밀번호 보기", AutoSize = true, Margin = new Padding(0, S(2), 0, 0) };
