@@ -45,7 +45,7 @@ namespace WiPass.UI
         private bool? hotspotOn;
         private bool locationWarned;
         private bool hotspotWarned;
-        private Action balloonClick;
+        private Notifier notifier;
 
         public TrayApp(WifiService wifi)
         {
@@ -60,6 +60,7 @@ namespace WiPass.UI
 
             menu = new ContextMenuStrip { Font = new System.Drawing.Font("Malgun Gothic", 9.5f) };
             menu.Opening += (s, e) => { BuildMenu(); e.Cancel = false; };
+            menu.Opened += (s, e) => WinTheme.RoundCorners(menu.Handle, false);
 
             tray = new NotifyIcon
             {
@@ -69,8 +70,7 @@ namespace WiPass.UI
                 Visible = true
             };
             tray.MouseUp += (s, e) => { if (e.Button == MouseButtons.Left) ShowMenuAtCursor(); };
-            tray.BalloonTipClicked += (s, e) => { var a = balloonClick; balloonClick = null; if (a != null) a(); };
-            tray.BalloonTipClosed += (s, e) => balloonClick = null;
+            notifier = new Notifier(tray, Post);
 
             wifi.AcmNotification += (itf, code, reason, profile) =>
             {
@@ -209,7 +209,7 @@ namespace WiPass.UI
 
         private void SwitchTo(Place place)
         {
-            if (busy) { Balloon("전환 중입니다", "진행 중인 전환이 끝난 뒤 다시 시도해 주세요.", ToolTipIcon.Info); return; }
+            if (busy) { Notify("전환 중입니다", "진행 중인 전환이 끝난 뒤 다시 시도해 주세요.", NoticeKind.Info); return; }
             if (!place.HasPassword) { OpenSettings(false); return; }
             StartSwitch(new List<Place> { place }, false);
         }
@@ -302,7 +302,7 @@ namespace WiPass.UI
                     hotspotOn = o.HotspotError == null;
                     msg += o.HotspotError == null ? "\r\n노트북 핫스팟도 켰습니다." : "\r\n핫스팟은 켜지 못했습니다: " + o.HotspotError;
                 }
-                Balloon(o.PlaceName + " 연결됨", msg, ToolTipIcon.Info);
+                Notify(o.PlaceName + " 연결됨", msg, NoticeKind.Info);
                 RefreshStatus();
             }
             else
@@ -323,12 +323,13 @@ namespace WiPass.UI
             {
                 autoRetryAfter = DateTime.UtcNow + AutoRetryDelay;
                 lastFailureText = "자동 전환 실패 - 메뉴에서 장소 선택";
-                Balloon("자동 전환 실패", message + "\r\n(" + (int)AutoRetryDelay.TotalMinutes + "분 뒤 다시 시도합니다)", ToolTipIcon.Warning);
+                Notify("자동 전환 실패", message + "\r\n" + (int)AutoRetryDelay.TotalMinutes + "분 뒤 다시 시도합니다.", NoticeKind.Warning,
+                    ShowMenuAtCursor, PickPlaceButton(), SettingsButton("비밀번호 확인"));
             }
             else
             {
                 lastFailureText = "전환 실패 - 메뉴에서 다시 시도";
-                Balloon("연결하지 못했습니다", message, ToolTipIcon.Error);
+                Notify("연결하지 못했습니다", message, NoticeKind.Error, ShowMenuAtCursor, PickPlaceButton(), SettingsButton("비밀번호 수정"));
             }
             SetState(TrayState.Failed, lastFailureText);
         }
@@ -338,9 +339,10 @@ namespace WiPass.UI
             if (locationWarned) return;
             locationWarned = true;
             Log.Warn("위치 권한이 꺼져 있어 주변 공유기를 확인하지 못함");
-            Balloon("위치 권한이 필요합니다",
-                "자동 전환을 하려면 설정 > 개인 정보 및 보안 > 위치에서 '위치 서비스'와 '데스크톱 앱이 위치에 액세스하도록 허용'을 켜 주세요.\r\n이 알림을 누르면 설정이 열립니다.",
-                ToolTipIcon.Warning, () => OpenUri("ms-settings:privacy-location"));
+            Action openLocation = () => OpenUri("ms-settings:privacy-location");
+            Notify("위치 권한이 필요합니다",
+                "자동 전환을 하려면 윈도우 위치 권한을 켜 주세요.\r\n위치 서비스와 '데스크톱 앱이 위치에 액세스하도록 허용'을 켜면 됩니다.",
+                NoticeKind.Warning, openLocation, new NoticeButton("위치 설정 열기", openLocation));
         }
 
         // ------------------------------------------------------------------ hotspot
@@ -366,8 +368,9 @@ namespace WiPass.UI
                 if (err != null && !hotspotWarned)
                 {
                     hotspotWarned = true;
-                    Balloon("핫스팟을 켜지 못했습니다", err + "\r\n이 알림을 누르면 윈도우 모바일 핫스팟 설정이 열립니다.",
-                        ToolTipIcon.Warning, () => OpenUri("ms-settings:network-mobilehotspot"));
+                    Action openHotspot = () => OpenUri("ms-settings:network-mobilehotspot");
+                    Notify("핫스팟을 켜지 못했습니다", err + "\r\n윈도우 모바일 핫스팟 설정에서 직접 켜 보세요.",
+                        NoticeKind.Warning, openHotspot, new NoticeButton("핫스팟 설정 열기", openHotspot));
                 }
                 else if (err == null) hotspotWarned = false;
                 RefreshStatus();
@@ -385,9 +388,28 @@ namespace WiPass.UI
 
         private void BuildMenu()
         {
+            MenuPalette palette = MenuPalette.Current();
+            var renderer = new ModernMenuRenderer(palette);
+            menu.Renderer = renderer;
+            menu.BackColor = palette.Background;
+            menu.ShowImageMargin = false;
+            menu.ShowCheckMargin = true;
+            menu.Padding = new Padding(0, 4, 0, 4);
             menu.Items.Clear();
 
-            menu.Items.Add(new ToolStripMenuItem(statusText) { Enabled = false });
+            // Header: where we are, then a quiet summary of the options.
+            menu.Items.Add(new ToolStripLabel(statusText)
+            {
+                Font = new System.Drawing.Font(menu.Font, System.Drawing.FontStyle.Bold),
+                TextAlign = System.Drawing.ContentAlignment.MiddleLeft,
+                Margin = new Padding(0, 6, 0, 0)
+            });
+            menu.Items.Add(new ToolStripLabel(StatusSummary())
+            {
+                Tag = "subtle",
+                TextAlign = System.Drawing.ContentAlignment.MiddleLeft,
+                Margin = new Padding(0, 0, 0, 6)
+            });
             menu.Items.Add(new ToolStripSeparator());
 
             if (settings.IsConfigured)
@@ -396,43 +418,66 @@ namespace WiPass.UI
                 foreach (var p in settings.Places)
                 {
                     Place place = p;
-                    var item = new ToolStripMenuItem(place.Name + "(으)로 전환")
+                    var item = Styled(new ToolStripMenuItem(Josa.WithRo(place.Name) + " 전환")
                     {
                         Checked = current != null && current.Id == place.Id,
                         Enabled = !busy
-                    };
+                    });
                     item.Click += (s, e) => SwitchTo(place);
                     menu.Items.Add(item);
                 }
                 menu.Items.Add(new ToolStripSeparator());
 
-                var auto = new ToolStripMenuItem("도착하면 자동 전환") { Checked = settings.AutoSwitch };
+                var auto = Styled(new ToolStripMenuItem("도착하면 자동 전환") { Checked = settings.AutoSwitch });
                 auto.Click += (s, e) => ToggleAutoSwitch();
                 menu.Items.Add(auto);
 
-                var hs = new ToolStripMenuItem("핫스팟 자동 켜기 (스마트폰 연결용)") { Checked = settings.AutoHotspot, Enabled = hotspot.Available };
+                var hs = Styled(new ToolStripMenuItem("핫스팟 자동 켜기 (스마트폰 연결용)") { Checked = settings.AutoHotspot, Enabled = hotspot.Available });
                 hs.Click += (s, e) => ToggleHotspot();
                 menu.Items.Add(hs);
                 menu.Items.Add(new ToolStripSeparator());
             }
 
-            var settingsItem = new ToolStripMenuItem(settings.IsConfigured ? "설정..." : "처음 설정하기...") { Enabled = !busy };
+            var settingsItem = Styled(new ToolStripMenuItem(settings.IsConfigured ? "설정..." : "처음 설정하기...") { Enabled = !busy });
             settingsItem.Click += (s, e) => OpenSettings(false);
             menu.Items.Add(settingsItem);
 
-            var help = new ToolStripMenuItem("도움말");
-            help.DropDownItems.Add(MakeItem("위치 권한 설정 열기", () => OpenUri("ms-settings:privacy-location")));
-            help.DropDownItems.Add(MakeItem("모바일 핫스팟 설정 열기", () => OpenUri("ms-settings:network-mobilehotspot")));
+            var help = Styled(new ToolStripMenuItem("도움말"));
+            help.DropDownItems.Add(Styled(MakeItem("위치 권한 설정 열기", () => OpenUri("ms-settings:privacy-location"))));
+            help.DropDownItems.Add(Styled(MakeItem("모바일 핫스팟 설정 열기", () => OpenUri("ms-settings:network-mobilehotspot"))));
             help.DropDownItems.Add(new ToolStripSeparator());
-            help.DropDownItems.Add(MakeItem("문의용 진단 정보 저장...", SaveDiagnostics));
-            help.DropDownItems.Add(MakeItem("기록 폴더 열기", () => { Directory.CreateDirectory(AppPaths.LogDir); OpenUri(AppPaths.LogDir); }));
-            help.DropDownItems.Add(MakeItem("문의하기 (GitHub)", () => OpenUri(AppInfo.IssuesUrl)));
+            help.DropDownItems.Add(Styled(MakeItem("문의용 진단 정보 저장...", SaveDiagnostics)));
+            help.DropDownItems.Add(Styled(MakeItem("기록 폴더 열기", () => { Directory.CreateDirectory(AppPaths.LogDir); OpenUri(AppPaths.LogDir); })));
+            help.DropDownItems.Add(Styled(MakeItem("문의하기 (GitHub)", () => OpenUri(AppInfo.IssuesUrl))));
             help.DropDownItems.Add(new ToolStripSeparator());
-            help.DropDownItems.Add(MakeItem(AppInfo.Name + " 정보", ShowAbout));
+            help.DropDownItems.Add(Styled(MakeItem(AppInfo.Name + " 정보", ShowAbout)));
+            var helpDrop = (ToolStripDropDownMenu)help.DropDown;
+            helpDrop.Renderer = renderer;
+            helpDrop.BackColor = palette.Background;
+            helpDrop.ShowImageMargin = false;
+            helpDrop.ShowCheckMargin = false;
+            helpDrop.Padding = new Padding(0, 4, 0, 4);
+            helpDrop.Opened += (s, e) => WinTheme.RoundCorners(helpDrop.Handle, false);
             menu.Items.Add(help);
 
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(MakeItem("종료", Quit));
+            menu.Items.Add(Styled(MakeItem("종료", Quit)));
+        }
+
+        /// <summary>Taller items with breathing room, like Windows 11 menus.</summary>
+        private static ToolStripMenuItem Styled(ToolStripMenuItem item)
+        {
+            item.Padding = new Padding(0, 5, 0, 5);
+            return item;
+        }
+
+        private string StatusSummary()
+        {
+            if (!settings.IsConfigured) return "작업표시줄 아이콘 → 설정에서 시작하세요";
+            string text = "자동 전환 " + OnOff(settings.AutoSwitch);
+            if (settings.AutoHotspot)
+                text += " · 핫스팟 " + (hotspotOn == true ? "켜짐" : hotspotOn == false ? "꺼짐" : "대기");
+            return text;
         }
 
         private static ToolStripMenuItem MakeItem(string text, Action onClick)
@@ -466,7 +511,7 @@ namespace WiPass.UI
             hotspotWarned = false;
             if (settings.AutoHotspot)
             {
-                Balloon("핫스팟 자동 켜기", "학교 와이파이에 연결되면 노트북 핫스팟을 켭니다.\r\n학교·기관의 무선망 보안 지침을 먼저 확인해 주세요.", ToolTipIcon.Info);
+                Notify("핫스팟 자동 켜기", "학교 와이파이에 연결되면 노트북 핫스팟을 켭니다.\r\n학교·기관의 무선망 보안 지침을 먼저 확인해 주세요.", NoticeKind.Info);
                 EvaluateSoon(500);
             }
             else StopHotspot();
@@ -538,11 +583,13 @@ namespace WiPass.UI
             tray.Text = tip.Length > 63 ? tip.Substring(0, 63) : tip;
         }
 
-        private void Balloon(string title, string text, ToolTipIcon icon, Action onClick = null)
+        private void Notify(string title, string text, NoticeKind kind, Action onClick = null, params NoticeButton[] buttons)
         {
-            balloonClick = onClick;
-            tray.ShowBalloonTip(5000, title, text, icon);
+            notifier.Show(title, text, kind, onClick, buttons);
         }
+
+        private NoticeButton PickPlaceButton() { return new NoticeButton("장소 고르기", ShowMenuAtCursor); }
+        private NoticeButton SettingsButton(string label) { return new NoticeButton(label, () => OpenSettings(false)); }
 
         // ------------------------------------------------------------------ dialogs
 
@@ -567,11 +614,11 @@ namespace WiPass.UI
                         hotspotWarned = false;
                         if (hotspotBefore && !settings.AutoHotspot) StopHotspot();
                         if (firstRun)
-                            Balloon("설정을 저장했습니다",
+                            Notify("설정을 저장했습니다",
                                 settings.AutoSwitch
-                                    ? "이제 장소에 도착하면 WiPass가 알아서 그 장소 비밀번호로 접속합니다. 아이콘을 눌러 직접 고를 수도 있습니다."
-                                    : "작업표시줄의 WiPass 아이콘을 눌러 지금 있는 장소를 고르면 그 비밀번호로 접속합니다.",
-                                ToolTipIcon.Info);
+                                    ? "이제 장소에 도착하면 WiPass가 알아서 접속합니다.\r\n작업표시줄 아이콘을 눌러 직접 고를 수도 있습니다."
+                                    : "작업표시줄의 WiPass 아이콘을 눌러\r\n지금 있는 장소를 고르면 그 비밀번호로 접속합니다.",
+                                NoticeKind.Info);
                     }
                 }
             }

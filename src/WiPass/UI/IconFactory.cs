@@ -38,21 +38,7 @@ namespace WiPass.UI
         }
 
         /// <summary>True when the taskbar uses the light theme.</summary>
-        public static bool LightTaskbar
-        {
-            get
-            {
-                try
-                {
-                    using (RegistryKey k = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
-                    {
-                        object v = k != null ? k.GetValue("SystemUsesLightTheme") : null;
-                        return v is int && (int)v == 1;
-                    }
-                }
-                catch { return false; }
-            }
-        }
+        public static bool LightTaskbar { get { return WinTheme.TaskbarLight; } }
 
         /// <summary>Forget cached icons (call after the Windows theme or display scale changes).</summary>
         public static void Invalidate()

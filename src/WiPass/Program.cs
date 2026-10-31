@@ -22,6 +22,8 @@ namespace WiPass
                     return;
                 }
 
+                // Same app ID as the Start menu shortcut, so Windows shows WiPass toasts with its icon.
+                Notifier.RegisterProcessAppId();
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 Application.ThreadException += (s, e) => Log.Error("처리되지 않은 오류: " + e.Exception);
