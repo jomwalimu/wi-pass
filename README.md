@@ -1,3 +1,14 @@
+<p align="center">
+  <img src="docs/images/banner.png" alt="와이패스 WiPass — 같은 이름 학교 와이파이, 장소에 맞게 자동 전환" width="760">
+</p>
+
+<p align="center">
+  <a href="https://github.com/jomwalimu/wi-pass/releases"><img src="https://img.shields.io/github/v/release/jomwalimu/wi-pass?include_prereleases&amp;label=%EC%B5%9C%EC%8B%A0%20%EB%B2%84%EC%A0%84&amp;color=0F766E" alt="최신 버전"></a>
+  <a href="https://github.com/jomwalimu/wi-pass/releases"><img src="https://img.shields.io/github/downloads/jomwalimu/wi-pass/total?label=%EB%82%B4%EB%A0%A4%EB%B0%9B%EA%B8%B0&amp;color=0F766E" alt="내려받기 수"></a>
+  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0F766E" alt="Windows 10, 11">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4-MIT-0F766E" alt="MIT 라이선스"></a>
+</p>
+
 # 와이패스 (WiPass)
 
 **같은 이름 학교 와이파이 자동 전환** — 윈도우 작업표시줄 프로그램
@@ -65,14 +76,16 @@ WiPass는 위치를 기록하거나 어디로 보내지 않습니다.
 
 ## 사용법
 
-### 아이콘 색
+### 작업표시줄 아이콘
 
-| 색 | 뜻 |
+작업표시줄 아이콘은 윈도우 색(밝게/어둡게)에 맞춰 흰색 또는 검은색으로 바뀌고, 오른쪽 아래 **점**으로 상태를 알려 줍니다.
+
+| 점 | 뜻 |
 |---|---|
 | 🟢 초록 | 학교 와이파이 연결됨 (마우스를 올리면 장소 이름 표시) |
 | 🟡 노랑 | 장소 비밀번호로 접속하는 중 |
 | 🔴 빨강 | 접속 실패 — 메뉴에서 장소를 직접 고르거나 비밀번호 확인 |
-| ⚪ 회색 | 학교 와이파이 연결 안 됨 / 다른 와이파이 사용 중 |
+| 점 없음 | 학교 와이파이 연결 안 됨 / 다른 와이파이 사용 중 |
 
 ### 작업표시줄 메뉴
 

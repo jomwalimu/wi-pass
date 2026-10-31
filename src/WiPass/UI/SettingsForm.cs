@@ -171,7 +171,7 @@ namespace WiPass.UI
             root.Controls.Add(placeRow);
 
             root.Controls.Add(MakeLabel("목록에서 장소를 두 번 클릭해도 수정할 수 있습니다.", false, SystemColors.GrayText));
-            root.Controls.Add(MakeLabel("비밀번호는 이 PC에만 암호화되어 저장되며, 어디로도 전송되지 않습니다.", false, Color.FromArgb(34, 120, 70)));
+            root.Controls.Add(MakeLabel("비밀번호는 이 PC에만 암호화되어 저장되며, 어디로도 전송되지 않습니다.", false, Color.FromArgb(15, 118, 110)));
 
             root.Controls.Add(Spacer(10));
 
@@ -306,7 +306,7 @@ namespace WiPass.UI
             switch (kind)
             {
                 case SecurityKind.Personal:
-                    lblSecurity.ForeColor = Color.FromArgb(34, 120, 70);
+                    lblSecurity.ForeColor = Color.FromArgb(15, 118, 110);
                     lblSecurity.Text = desc + "  ✔ 지원합니다";
                     break;
                 case SecurityKind.Enterprise:

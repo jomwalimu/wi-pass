@@ -37,6 +37,7 @@ namespace WiPass.UI
         private bool hotspotBusy;
         private bool settingsOpen;
         private string statusText = "상태 확인 중...";
+        private TrayState currentState = TrayState.Idle;
         private DateTime autoRetryAfter = DateTime.MinValue;
         private DateTime? windowsConnectingSince;
         private DateTime? lastFailureAt;
@@ -78,6 +79,8 @@ namespace WiPass.UI
                     Post(() => { if (!busy) { RefreshStatus(); EvaluateSoon(2500); } });
             };
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
+            SystemEvents.UserPreferenceChanged += OnThemeChanged;
+            SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
 
             checkTimer = new Timer { Interval = CheckIntervalMs };
             checkTimer.Tick += (s, e) => { RefreshStatus(); Evaluate(); };
@@ -508,8 +511,27 @@ namespace WiPass.UI
             }
         }
 
+        // The tray glyph follows the taskbar colour (light/dark) and the display scale.
+        private void OnThemeChanged(object sender, UserPreferenceChangedEventArgs e)
+        {
+            if (e.Category == UserPreferenceCategory.General || e.Category == UserPreferenceCategory.VisualStyle || e.Category == UserPreferenceCategory.Color)
+                Post(RedrawIcon);
+        }
+
+        private void OnDisplayChanged(object sender, EventArgs e)
+        {
+            Post(RedrawIcon);
+        }
+
+        private void RedrawIcon()
+        {
+            IconFactory.Invalidate();
+            tray.Icon = IconFactory.Get(currentState);
+        }
+
         private void SetState(TrayState state, string text)
         {
+            currentState = state;
             statusText = text;
             tray.Icon = IconFactory.Get(state);
             string tip = AppInfo.Name + ": " + text;
@@ -607,6 +629,8 @@ namespace WiPass.UI
         {
             Log.Info("WiPass 종료");
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+            SystemEvents.UserPreferenceChanged -= OnThemeChanged;
+            SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
             checkTimer.Stop();
             evaluateSoon.Stop();
             tray.Visible = false;
