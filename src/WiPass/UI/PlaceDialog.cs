@@ -1,18 +1,18 @@
 using System;
 using System.Drawing;
 using System.Windows.Forms;
+using WiPass.UI.Fluent;
 using WiPass.Wifi;
 
 namespace WiPass.UI
 {
-    /// <summary>Small "add place" / "edit place" window: name + password.</summary>
-    internal sealed class PlaceDialog : Form
+    /// <summary>Small "add place" / "edit place" window: name + password, errors shown inline.</summary>
+    internal sealed class PlaceDialog : FWindow
     {
         private readonly bool editing;
         private readonly Func<string, bool> nameTaken;
-        private readonly float scale;
-        private TextBox txtName;
-        private TextBox txtPassword;
+        private readonly FTextBox txtName, txtPassword;
+        private readonly FLabel error;
 
         public string PlaceName { get { return txtName.Text.Trim(); } }
         /// <summary>Empty when editing and the user left the password unchanged.</summary>
@@ -24,102 +24,75 @@ namespace WiPass.UI
         {
             editing = currentName != null;
             this.nameTaken = nameTaken;
-
-            Font = new Font("Malgun Gothic", 9.5f);
-            using (Graphics g = CreateGraphics()) scale = g.DpiX / 96f;
             Text = editing ? "장소 수정" : "장소 추가";
-            Icon = IconFactory.AppIcon;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = false;
             ShowInTaskbar = false;
             StartPosition = FormStartPosition.CenterParent;
-            AutoSize = true;
-            AutoSizeMode = AutoSizeMode.GrowAndShrink;
 
-            var root = new TableLayoutPanel
-            {
-                ColumnCount = 2,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Padding = new Padding(S(16), S(14), S(16), S(12))
-            };
-            Controls.Add(root);
+            int W = Fx.S(440), pad = Fx.S(24), inner = W - pad * 2;
+            int y = Fx.S(20);
+            Controls.Add(new FLabel(editing ? "장소 수정" : "장소 추가", Fx.Font(20, FontStyle.Bold), p.Text) { BackColor = p.Window, Location = new Point(pad, y) });
+            y += Fx.S(40);
 
-            root.Controls.Add(Caption("장소 이름"), 0, 0);
-            txtName = new TextBox { Width = S(260), MaxLength = 40, Text = currentName ?? "" };
-            root.Controls.Add(txtName, 1, 0);
-            root.Controls.Add(Hint("예: ○○초, 본교, 분교"), 1, 1);
+            Controls.Add(new FLabel("장소 이름", Fx.Font(12), p.SubText) { BackColor = p.Window, Location = new Point(pad, y) });
+            y += Fx.S(20);
+            txtName = new FTextBox(p, "장소 이름", false, "예: ○○초, 본교, 분교") { BackColor = p.Window, Location = new Point(pad, y), Width = inner, Text = currentName ?? "" };
+            txtName.Box.MaxLength = 40;
+            Controls.Add(txtName);
+            y += txtName.Height + Fx.S(14);
 
-            root.Controls.Add(Caption("비밀번호"), 0, 2);
-            // Passwords are Latin letters, digits and symbols: Malgun Gothic spaces those unevenly,
-            // so the password box uses the Windows UI Latin font instead.
-            txtPassword = new TextBox
-            {
-                Width = S(260),
-                MaxLength = 64,
-                UseSystemPasswordChar = true,
-                Font = new Font("Segoe UI", 10f)
-            };
-            root.Controls.Add(txtPassword, 1, 2);
+            Controls.Add(new FLabel("와이파이 비밀번호", Fx.Font(12), p.SubText) { BackColor = p.Window, Location = new Point(pad, y) });
+            y += Fx.S(20);
+            txtPassword = new FTextBox(p, "와이파이 비밀번호", true) { BackColor = p.Window, Location = new Point(pad, y), Width = inner };
+            txtPassword.Box.MaxLength = 64;
+            Controls.Add(txtPassword);
+            y += txtPassword.Height + Fx.S(6);
+            var hint = new FLabel(editing ? "바꾸지 않으려면 비워 두세요. 지금 저장된 비밀번호가 그대로 쓰입니다." : "8~63자 · 이 PC에만 암호화해서 저장합니다.",
+                Fx.Font(12), p.SubText, true) { BackColor = p.Window, Location = new Point(pad, y), Width = inner };
+            hint.FitHeight();
+            Controls.Add(hint);
+            y += hint.Height + Fx.S(6);
 
-            var chkShow = new CheckBox { Text = "비밀번호 보기", AutoSize = true, Margin = new Padding(0, S(2), 0, 0) };
-            chkShow.CheckedChanged += (s, e) => txtPassword.UseSystemPasswordChar = !chkShow.Checked;
-            root.Controls.Add(chkShow, 1, 3);
+            error = new FLabel("", Fx.Font(13), p.Danger) { BackColor = p.Window, Location = new Point(pad, y), Width = inner, Visible = false };
+            Controls.Add(error);
+            y += Fx.S(26);
 
-            root.Controls.Add(Hint(editing
-                ? "비밀번호를 바꾸지 않으려면 비워 두세요.\r\n지금 저장된 비밀번호가 그대로 쓰입니다."
-                : "이 장소 와이파이의 비밀번호 (8~63자)"), 1, 4);
+            var footer = new FFooter(p) { Location = new Point(0, y), Size = new Size(W, Fx.S(66)) };
+            var ok = new FButton(p, editing ? "수정" : "추가", FButtonKind.Accent);
+            var cancel = new FButton(p, "취소", FButtonKind.Standard) { DialogResult = DialogResult.Cancel };
+            cancel.Location = new Point(W - pad - cancel.Width, (footer.Height - cancel.Height) / 2);
+            ok.Location = new Point(cancel.Left - Fx.S(8) - ok.Width, cancel.Top);
+            ok.Click += (s, e) => Confirm();
+            footer.Controls.Add(ok);
+            footer.Controls.Add(cancel);
+            Controls.Add(footer);
 
-            var buttons = new FlowLayoutPanel
-            {
-                AutoSize = true,
-                FlowDirection = FlowDirection.RightToLeft,
-                WrapContents = false,
-                Dock = DockStyle.Fill,
-                Margin = new Padding(0, S(12), 0, 0)
-            };
-            var btnCancel = new Button { Text = "취소", AutoSize = true, MinimumSize = new Size(S(80), 0), DialogResult = DialogResult.Cancel };
-            var btnOk = new Button { Text = editing ? "수정" : "추가", AutoSize = true, MinimumSize = new Size(S(80), 0) };
-            btnOk.Click += (s, e) => Confirm();
-            buttons.Controls.Add(btnCancel);
-            buttons.Controls.Add(btnOk);
-            root.Controls.Add(buttons, 0, 5);
-            root.SetColumnSpan(buttons, 2);
-
-            AcceptButton = btnOk;
-            CancelButton = btnCancel;
-            Shown += (s, e) => { if (editing) txtPassword.Focus(); else txtName.Focus(); };
+            ClientSize = new Size(W, y + footer.Height);
+            AcceptButton = ok;
+            CancelButton = cancel;
+            Shown += (s, e) => { if (editing) txtPassword.Box.Focus(); else txtName.Box.Focus(); };
         }
 
-        private int S(int px) { return (int)Math.Round(px * scale); }
-
-        private Label Caption(string text)
+        private void ShowError(string msg, Control focus)
         {
-            return new Label { Text = text, AutoSize = true, Margin = new Padding(0, S(6), S(10), 0) };
-        }
-
-        private Label Hint(string text)
-        {
-            return new Label { Text = text, AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(0, S(2), 0, S(6)) };
+            error.Text = msg;
+            error.Visible = true;
+            if (focus != null) focus.Focus();
         }
 
         private void Confirm()
         {
-            if (PlaceName.Length == 0) { Warn("장소 이름을 입력해 주세요."); txtName.Focus(); return; }
-            if (nameTaken != null && nameTaken(PlaceName)) { Warn("같은 이름의 장소가 이미 있습니다."); txtName.Focus(); return; }
+            if (PlaceName.Length == 0) { ShowError("장소 이름을 입력해 주세요.", txtName.Box); return; }
+            if (nameTaken != null && nameTaken(PlaceName)) { ShowError("같은 이름의 장소가 이미 있어요.", txtName.Box); return; }
             if (!editing || Password.Length > 0)
             {
                 string err = ProfileBuilder.ValidatePassword(Password);
-                if (err != null) { Warn(err); txtPassword.Focus(); return; }
+                if (err != null) { ShowError(err, txtPassword.Box); return; }
             }
             DialogResult = DialogResult.OK;
             Close();
-        }
-
-        private void Warn(string msg)
-        {
-            MessageBox.Show(this, msg, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 }

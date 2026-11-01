@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -14,7 +13,7 @@ using WiPass.Wifi;
 namespace WiPass.UI
 {
     /// <summary>The taskbar (notification area) application: status, menu, automatic switching.</summary>
-    internal sealed class TrayApp : ApplicationContext
+    internal sealed class TrayApp : ApplicationContext, ISettingsHost
     {
         private static readonly TimeSpan AutoRetryDelay = TimeSpan.FromMinutes(5);
         private static readonly TimeSpan WindowsConnectingGrace = TimeSpan.FromSeconds(20);
@@ -35,17 +34,25 @@ namespace WiPass.UI
         private AppSettings settings;
         private bool busy;
         private bool hotspotBusy;
-        private bool settingsOpen;
+        private bool wizardOpen;
         private string statusText = "상태 확인 중...";
         private TrayState currentState = TrayState.Idle;
         private DateTime autoRetryAfter = DateTime.MinValue;
         private DateTime? windowsConnectingSince;
         private DateTime? lastFailureAt;
-        private string lastFailureText;
+        private string lastFailureText, lastFailureSub;
+        private string connectedPlaceId;
         private bool? hotspotOn;
         private bool locationWarned;
         private bool hotspotWarned;
         private Notifier notifier;
+        private FlyoutForm flyout;
+        private SettingsWindow settingsWindow;
+        private string flyoutSignature;
+        private string flyTitle = "상태 확인 중", flySub = "";
+        private HotspotInfo hotspotInfo;
+        private bool hotspotInfoLoading;
+        private string lastSwitchText;
 
         public TrayApp(WifiService wifi)
         {
@@ -69,7 +76,7 @@ namespace WiPass.UI
                 ContextMenuStrip = menu,
                 Visible = true
             };
-            tray.MouseUp += (s, e) => { if (e.Button == MouseButtons.Left) ShowMenuAtCursor(); };
+            tray.MouseUp += (s, e) => { if (e.Button == MouseButtons.Left) ToggleFlyout(); };
             notifier = new Notifier(tray, Post);
 
             wifi.AcmNotification += (itf, code, reason, profile) =>
@@ -97,7 +104,7 @@ namespace WiPass.UI
             Post(() =>
             {
                 RefreshStatus();
-                if (!settings.IsConfigured) OpenSettings(true);
+                if (!settings.IsConfigured) OpenSettings();
                 else EvaluateSoon(1500);
             });
         }
@@ -140,7 +147,7 @@ namespace WiPass.UI
         /// </summary>
         private void Evaluate()
         {
-            if (busy || settingsOpen || !settings.IsConfigured) return;
+            if (busy || wizardOpen || !settings.IsConfigured) return;
             try
             {
                 WifiInterface itf = wifi.GetPrimaryInterface();
@@ -210,7 +217,7 @@ namespace WiPass.UI
         private void SwitchTo(Place place)
         {
             if (busy) { Notify("전환 중입니다", "진행 중인 전환이 끝난 뒤 다시 시도해 주세요.", NoticeKind.Info); return; }
-            if (!place.HasPassword) { OpenSettings(false); return; }
+            if (!place.HasPassword) { OpenSettings(); return; }
             StartSwitch(new List<Place> { place }, false);
         }
 
@@ -250,7 +257,9 @@ namespace WiPass.UI
                 {
                     SwitchRequest req = requests[i];
                     string label = (automatic ? "자동 전환: " : "") + req.PlaceName + " 비밀번호로 접속 중...";
-                    Post(() => SetState(TrayState.Busy, label));
+                    string busyTitle = Josa.WithRo(req.PlaceName) + " 연결 중";
+                    string busySub = automatic ? "도착한 장소를 확인해 자동으로 전환하고 있어요" : "저장된 비밀번호로 연결하고 있어요";
+                    Post(() => SetState(TrayState.Busy, label, busyTitle, busySub));
                     req.Template = tpl;
                     SwitchResult r = switcher.Run(req);
                     o.Tried++;
@@ -300,8 +309,10 @@ namespace WiPass.UI
                 if (o.HotspotTried)
                 {
                     hotspotOn = o.HotspotError == null;
+                    hotspotInfo = null;
                     msg += o.HotspotError == null ? "\r\n노트북 핫스팟도 켰습니다." : "\r\n핫스팟은 켜지 못했습니다: " + o.HotspotError;
                 }
+                lastSwitchText = DateTime.Now.ToString("HH:mm") + (automatic ? " 자동 전환" : " 직접 전환") + " · " + o.PlaceName;
                 Notify(o.PlaceName + " 연결됨", msg, NoticeKind.Info);
                 RefreshStatus();
             }
@@ -324,14 +335,15 @@ namespace WiPass.UI
                 autoRetryAfter = DateTime.UtcNow + AutoRetryDelay;
                 lastFailureText = "자동 전환 실패 - 메뉴에서 장소 선택";
                 Notify("자동 전환 실패", message + "\r\n" + (int)AutoRetryDelay.TotalMinutes + "분 뒤 다시 시도합니다.", NoticeKind.Warning,
-                    ShowMenuAtCursor, PickPlaceButton(), SettingsButton("비밀번호 확인"));
+                    OpenFlyout, PickPlaceButton(), SettingsButton("비밀번호 확인"));
             }
             else
             {
                 lastFailureText = "전환 실패 - 메뉴에서 다시 시도";
-                Notify("연결하지 못했습니다", message, NoticeKind.Error, ShowMenuAtCursor, PickPlaceButton(), SettingsButton("비밀번호 수정"));
+                Notify("연결하지 못했습니다", message, NoticeKind.Error, OpenFlyout, PickPlaceButton(), SettingsButton("비밀번호 수정"));
             }
-            SetState(TrayState.Failed, lastFailureText);
+            lastFailureSub = automatic ? (int)AutoRetryDelay.TotalMinutes + "분 뒤 다시 시도해요 · 아래에서 장소를 직접 고를 수 있어요" : "장소를 다시 고르거나 설정에서 비밀번호를 확인하세요";
+            SetState(TrayState.Failed, lastFailureText, "연결하지 못했어요", lastFailureSub);
         }
 
         private void WarnLocation()
@@ -365,6 +377,7 @@ namespace WiPass.UI
                 HotspotState st = t.Result.Item1;
                 string err = t.Result.Item2;
                 hotspotOn = st == HotspotState.On ? true : st == HotspotState.Off ? false : (bool?)null;
+                if (flyout != null && flyout.Visible) LoadHotspotInfo();
                 if (err != null && !hotspotWarned)
                 {
                     hotspotWarned = true;
@@ -381,7 +394,7 @@ namespace WiPass.UI
         {
             if (!hotspot.Available || string.IsNullOrEmpty(settings.Ssid)) return;
             string ssid = settings.Ssid;
-            Task.Factory.StartNew(() => hotspot.Stop(ssid)).ContinueWith(t => Post(() => { hotspotOn = null; RefreshStatus(); }));
+            Task.Factory.StartNew(() => hotspot.Stop(ssid)).ContinueWith(t => Post(() => { hotspotOn = null; hotspotInfo = null; RefreshStatus(); }));
         }
 
         // ------------------------------------------------------------------ menu
@@ -429,17 +442,17 @@ namespace WiPass.UI
                 menu.Items.Add(new ToolStripSeparator());
 
                 var auto = Styled(new ToolStripMenuItem("도착하면 자동 전환") { Checked = settings.AutoSwitch });
-                auto.Click += (s, e) => ToggleAutoSwitch();
+                auto.Click += (s, e) => SetAutoSwitch(!settings.AutoSwitch);
                 menu.Items.Add(auto);
 
                 var hs = Styled(new ToolStripMenuItem("핫스팟 자동 켜기 (스마트폰 연결용)") { Checked = settings.AutoHotspot, Enabled = hotspot.Available });
-                hs.Click += (s, e) => ToggleHotspot();
+                hs.Click += (s, e) => SetAutoHotspot(!settings.AutoHotspot);
                 menu.Items.Add(hs);
                 menu.Items.Add(new ToolStripSeparator());
             }
 
-            var settingsItem = Styled(new ToolStripMenuItem(settings.IsConfigured ? "설정..." : "처음 설정하기...") { Enabled = !busy });
-            settingsItem.Click += (s, e) => OpenSettings(false);
+            var settingsItem = Styled(new ToolStripMenuItem(settings.IsConfigured ? "설정..." : "처음 설정하기..."));
+            settingsItem.Click += (s, e) => OpenSettings();
             menu.Items.Add(settingsItem);
 
             var help = Styled(new ToolStripMenuItem("도움말"));
@@ -450,7 +463,7 @@ namespace WiPass.UI
             help.DropDownItems.Add(Styled(MakeItem("기록 폴더 열기", () => { Directory.CreateDirectory(AppPaths.LogDir); OpenUri(AppPaths.LogDir); })));
             help.DropDownItems.Add(Styled(MakeItem("문의하기 (GitHub)", () => OpenUri(AppInfo.IssuesUrl))));
             help.DropDownItems.Add(new ToolStripSeparator());
-            help.DropDownItems.Add(Styled(MakeItem(AppInfo.Name + " 정보", ShowAbout)));
+            help.DropDownItems.Add(Styled(MakeItem("와이패스 정보", () => OpenSettings(SettingsWindow.PageAbout))));
             var helpDrop = (ToolStripDropDownMenu)help.DropDown;
             helpDrop.Renderer = renderer;
             helpDrop.BackColor = palette.Background;
@@ -487,34 +500,38 @@ namespace WiPass.UI
             return item;
         }
 
-        private void ShowMenuAtCursor()
+        private void SetAutoSwitch(bool on)
         {
-            // NotifyIcon only opens its menu on right click; reuse its internal method for left click.
-            MethodInfo mi = typeof(NotifyIcon).GetMethod("ShowContextMenu", BindingFlags.Instance | BindingFlags.NonPublic);
-            if (mi != null) mi.Invoke(tray, null);
+            if (settings.AutoSwitch != on) { settings.AutoSwitch = on; settings.Save(); }
+            Log.Info("자동 전환 " + OnOff(on));
+            AfterAutoSwitchChanged();
         }
 
-        private void ToggleAutoSwitch()
+        private void AfterAutoSwitchChanged()
         {
-            settings.AutoSwitch = !settings.AutoSwitch;
-            settings.Save();
-            Log.Info("자동 전환 " + OnOff(settings.AutoSwitch));
             if (settings.AutoSwitch) { autoRetryAfter = DateTime.MinValue; EvaluateSoon(500); }
             RefreshStatus();
+            UpdateWindowsSoon();
         }
 
-        private void ToggleHotspot()
+        private void SetAutoHotspot(bool on)
         {
-            settings.AutoHotspot = !settings.AutoHotspot;
-            settings.Save();
-            Log.Info("핫스팟 자동 켜기 " + OnOff(settings.AutoHotspot));
+            if (settings.AutoHotspot != on) { settings.AutoHotspot = on; settings.Save(); }
+            Log.Info("핫스팟 자동 켜기 " + OnOff(on));
+            AfterHotspotChanged(true);
+        }
+
+        private void AfterHotspotChanged(bool notify)
+        {
             hotspotWarned = false;
             if (settings.AutoHotspot)
             {
-                Notify("핫스팟 자동 켜기", "학교 와이파이에 연결되면 노트북 핫스팟을 켭니다.\r\n학교·기관의 무선망 보안 지침을 먼저 확인해 주세요.", NoticeKind.Info);
+                if (notify)
+                    Notify("핫스팟 자동 켜기", "학교 와이파이에 연결되면 노트북 핫스팟을 켭니다.\r\n학교·기관의 무선망 보안 지침을 먼저 확인해 주세요.", NoticeKind.Info);
                 EvaluateSoon(500);
             }
             else StopHotspot();
+            UpdateWindowsSoon();
         }
 
         // ------------------------------------------------------------------ status
@@ -524,9 +541,10 @@ namespace WiPass.UI
             if (busy) return;
             try
             {
+                connectedPlaceId = null;
                 WifiInterface itf = wifi.GetPrimaryInterface();
-                if (itf == null) { SetState(TrayState.Idle, "무선랜 장치 없음"); return; }
-                if (!settings.IsConfigured) { SetState(TrayState.Idle, "설정이 필요합니다"); return; }
+                if (itf == null) { SetState(TrayState.Idle, "무선랜 장치 없음", "무선랜 장치 없음", "와이파이 어댑터가 켜져 있는지 확인해 주세요"); return; }
+                if (!settings.IsConfigured) { SetState(TrayState.Idle, "설정이 필요합니다", "설정이 필요해요", "학교 와이파이와 장소를 정해 주세요"); return; }
 
                 CurrentConnection cur = wifi.GetCurrent(itf.Id);
                 bool connected = cur != null && cur.State == WlanNative.STATE_CONNECTED;
@@ -535,19 +553,23 @@ namespace WiPass.UI
                     Place p = settings.FindPlaceByBssid(cur.Bssid) ?? settings.FindPlace(settings.CurrentPlaceId);
                     string text = (p != null ? p.Name : "학교 와이파이") + " 연결됨";
                     if (settings.AutoHotspot && hotspotOn.HasValue) text += " · 핫스팟 " + (hotspotOn.Value ? "켜짐" : "꺼짐");
-                    SetState(TrayState.Connected, text);
+                    connectedPlaceId = p != null ? p.Id : null;
+                    SetState(TrayState.Connected, text, p != null ? p.Name : "학교 와이파이", settings.Ssid + " 연결됨");
+                    return;
                 }
                 else if (lastFailureAt.HasValue && DateTime.UtcNow - lastFailureAt.Value < AutoRetryDelay)
                 {
-                    SetState(TrayState.Failed, lastFailureText);
+                    SetState(TrayState.Failed, lastFailureText, "연결하지 못했어요", lastFailureSub);
                 }
                 else if (connected)
                 {
-                    SetState(TrayState.Idle, "다른 와이파이 사용 중" + (cur.Ssid.Length > 0 ? " (" + cur.Ssid + ")" : ""));
+                    SetState(TrayState.Idle, "다른 와이파이 사용 중" + (cur.Ssid.Length > 0 ? " (" + cur.Ssid + ")" : ""), "다른 와이파이 사용 중",
+                        (cur.Ssid.Length > 0 ? cur.Ssid + " · " : "") + "이 연결은 건드리지 않아요");
                 }
                 else
                 {
-                    SetState(TrayState.Idle, "학교 와이파이 연결 안 됨");
+                    SetState(TrayState.Idle, "학교 와이파이 연결 안 됨", "연결 안 됨",
+                        settings.AutoSwitch ? "장소에 도착하면 자동으로 연결해요" : "아래에서 지금 있는 장소를 고르세요");
                 }
             }
             catch (Exception ex)
@@ -574,10 +596,13 @@ namespace WiPass.UI
             tray.Icon = IconFactory.Get(currentState);
         }
 
-        private void SetState(TrayState state, string text)
+        private void SetState(TrayState state, string text, string title = null, string sub = null)
         {
             currentState = state;
             statusText = text;
+            flyTitle = title ?? text;
+            flySub = sub ?? "";
+            UpdateWindowsSoon();
             tray.Icon = IconFactory.Get(state);
             string tip = AppInfo.Name + ": " + text;
             tray.Text = tip.Length > 63 ? tip.Substring(0, 63) : tip;
@@ -588,49 +613,228 @@ namespace WiPass.UI
             notifier.Show(title, text, kind, onClick, buttons);
         }
 
-        private NoticeButton PickPlaceButton() { return new NoticeButton("장소 고르기", ShowMenuAtCursor); }
-        private NoticeButton SettingsButton(string label) { return new NoticeButton(label, () => OpenSettings(false)); }
+        private NoticeButton PickPlaceButton() { return new NoticeButton("장소 고르기", OpenFlyout); }
+        private NoticeButton SettingsButton(string label) { return new NoticeButton(label, () => OpenSettings()); }
 
         // ------------------------------------------------------------------ dialogs
 
-        private void OpenSettings(bool firstRun)
+        /// <summary>First run (nothing set up yet) opens the wizard; otherwise the settings window (one at a time).</summary>
+        private void OpenSettings(int page = SettingsWindow.PagePlaces)
         {
-            if (settingsOpen || busy) return;
-            settingsOpen = true;
+            if (flyout != null) flyout.HideFlyout();
+            if (settingsWindow != null && !settingsWindow.IsDisposed)
+            {
+                if (settingsWindow.WindowState == FormWindowState.Minimized) settingsWindow.WindowState = FormWindowState.Normal;
+                settingsWindow.ShowPage(page);
+                settingsWindow.Activate();
+                return;
+            }
+            if (wizardOpen) return;
+            if (!settings.IsConfigured && page == SettingsWindow.PagePlaces) { RunWizard(); return; }
+
+            settingsWindow = new SettingsWindow(wifi, settings, this);
+            settingsWindow.FormClosed += (s, e) =>
+            {
+                settingsWindow = null;
+                RefreshStatus();
+                EvaluateSoon(1500);
+            };
+            settingsWindow.ShowPage(page);
+            settingsWindow.Show();
+            settingsWindow.Activate();
+        }
+
+        private void RunWizard()
+        {
+            if (wizardOpen || busy) return;
+            wizardOpen = true;
             bool hotspotBefore = settings.AutoHotspot;
             try
             {
-                using (var f = new SettingsForm(wifi, settings, firstRun, hotspot.Available))
+                using (var f = new SetupWizard(wifi, settings, hotspot.Available))
                 {
                     if (f.ShowDialog() == DialogResult.OK && f.Result != null)
                     {
                         settings = f.Result;
                         settings.Save();
                         StartupManager.Apply(settings.StartWithWindows);
-                        Log.Info("설정 저장: 장소 " + settings.Places.Count + "개, 자동 전환 " + OnOff(settings.AutoSwitch) +
+                        Log.Info("처음 설정 완료: 장소 " + settings.Places.Count + "개, 자동 전환 " + OnOff(settings.AutoSwitch) +
                                  ", 자동 실행 " + OnOff(settings.StartWithWindows) + ", 핫스팟 " + OnOff(settings.AutoHotspot));
                         autoRetryAfter = DateTime.MinValue;
                         lastFailureAt = null;
                         hotspotWarned = false;
                         if (hotspotBefore && !settings.AutoHotspot) StopHotspot();
-                        if (firstRun)
-                            Notify("설정을 저장했습니다",
-                                settings.AutoSwitch
-                                    ? "이제 장소에 도착하면 WiPass가 알아서 접속합니다.\r\n작업표시줄 아이콘을 눌러 직접 고를 수도 있습니다."
-                                    : "작업표시줄의 WiPass 아이콘을 눌러\r\n지금 있는 장소를 고르면 그 비밀번호로 접속합니다.",
-                                NoticeKind.Info);
+                        Notify("준비됐어요",
+                            settings.AutoSwitch
+                                ? "이제 장소에 도착하면 와이패스가 알아서 연결합니다.\r\n작업표시줄 아이콘을 눌러 직접 고를 수도 있어요."
+                                : "작업표시줄의 와이패스 아이콘을 눌러\r\n지금 있는 장소를 고르면 그 비밀번호로 연결합니다.",
+                            NoticeKind.Info);
                     }
                 }
             }
             finally
             {
-                settingsOpen = false;
+                wizardOpen = false;
                 RefreshStatus();
                 EvaluateSoon(1500);
             }
         }
 
-        private void SaveDiagnostics()
+        // ------------------------------------------------------------------ settings window host
+
+        bool ISettingsHost.HotspotAvailable { get { return hotspot.Available; } }
+
+        string ISettingsHost.ConnectedPlaceId { get { return currentState == TrayState.Connected ? connectedPlaceId : null; } }
+
+        HotspotInfo ISettingsHost.GetHotspotInfo() { return hotspot.GetInfo(settings.Ssid); }
+
+        bool ISettingsHost.LocationAllowed()
+        {
+            try
+            {
+                WifiInterface itf = wifi.GetPrimaryInterface();
+                if (itf != null) wifi.GetVisibleNetworks(itf.Id);
+                locationWarned = false;
+                return true;
+            }
+            catch (LocationDeniedException) { return false; }
+            catch { return true; }
+        }
+
+        void ISettingsHost.SaveDiagnostics(IWin32Window owner) { SaveDiagnostics(owner); }
+
+        void ISettingsHost.OnSettingsChanged(SettingChange change)
+        {
+            switch (change)
+            {
+                case SettingChange.Places:
+                case SettingChange.Ssid:
+                    Log.Info("설정 변경: 장소 " + settings.Places.Count + "개");
+                    autoRetryAfter = DateTime.MinValue;
+                    lastFailureAt = null;
+                    if (change == SettingChange.Ssid) { hotspotOn = null; hotspotInfo = null; }
+                    RefreshStatus();
+                    EvaluateSoon(1500);
+                    break;
+                case SettingChange.AutoSwitch:
+                    AfterAutoSwitchChanged();
+                    break;
+                case SettingChange.Startup:
+                    StartupManager.Apply(settings.StartWithWindows);
+                    Log.Info("윈도우 시작 시 실행 " + OnOff(settings.StartWithWindows));
+                    break;
+                case SettingChange.Hotspot:
+                    AfterHotspotChanged(false);
+                    break;
+            }
+            UpdateWindowsSoon();
+        }
+
+        // ------------------------------------------------------------------ flyout
+
+        private void EnsureFlyout()
+        {
+            if (flyout != null && !flyout.IsDisposed) return;
+            flyout = new FlyoutForm();
+            flyout.SwitchRequested += id =>
+            {
+                Place place = settings.FindPlace(id);
+                if (place != null) SwitchTo(place);
+            };
+            flyout.AutoSwitchChanged += on => Post(() => SetAutoSwitch(on));
+            flyout.HotspotChanged += on => Post(() => SetAutoHotspot(on));
+            flyout.SettingsRequested += () => Post(() => OpenSettings());
+        }
+
+        private void ToggleFlyout()
+        {
+            EnsureFlyout();
+            if (flyout.Visible) { flyout.HideFlyout(); return; }
+            if (flyout.JustHidden) return; // the click that closed it was on the tray icon
+            OpenFlyout();
+        }
+
+        private void OpenFlyout()
+        {
+            EnsureFlyout();
+            RefreshStatus();
+            FlyoutModel m = BuildFlyoutModel();
+            flyoutSignature = Signature(m);
+            flyout.ShowFlyout(m);
+            LoadHotspotInfo();
+        }
+
+        private FlyoutModel BuildFlyoutModel()
+        {
+            var m = new FlyoutModel
+            {
+                Configured = settings.IsConfigured,
+                State = currentState,
+                Title = flyTitle,
+                Subtitle = flySub,
+                Busy = busy,
+                AutoSwitch = settings.AutoSwitch,
+                AutoHotspot = settings.AutoHotspot,
+                HotspotAvailable = hotspot.Available,
+                Footer = lastSwitchText ?? ("와이패스 " + AppInfo.Version)
+            };
+            string here = currentState == TrayState.Connected ? connectedPlaceId : null;
+            foreach (var pl in settings.Places)
+                m.Places.Add(new FlyoutPlace { Id = pl.Id, Name = pl.Name, Current = pl.Id == here });
+
+            if (!hotspot.Available) m.HotspotDetail = "이 PC에서는 쓸 수 없어요";
+            else if (!settings.AutoHotspot) m.HotspotDetail = "켜면 학교 와이파이에 연결될 때 자동으로 켜요";
+            else if (hotspotOn == true || (hotspotInfo != null && hotspotInfo.State == HotspotState.On))
+            {
+                m.HotspotDetail = "켜짐";
+                if (hotspotInfo != null && !string.IsNullOrEmpty(hotspotInfo.ApSsid)) m.HotspotDetail += " · " + hotspotInfo.ApSsid;
+                if (hotspotInfo != null && hotspotInfo.Clients >= 0) m.HotspotDetail += " · 기기 " + hotspotInfo.Clients + "대";
+            }
+            else m.HotspotDetail = currentState == TrayState.Connected ? "켜는 중이거나 꺼져 있어요" : "학교 와이파이에 연결되면 켜요";
+            return m;
+        }
+
+        private static string Signature(FlyoutModel m)
+        {
+            var sb = new StringBuilder();
+            sb.Append(m.Configured).Append(m.State).Append(m.Title).Append('|').Append(m.Subtitle).Append(m.Busy)
+              .Append(m.AutoSwitch).Append(m.AutoHotspot).Append(m.HotspotDetail).Append(m.Footer);
+            foreach (var pl in m.Places) sb.Append('|').Append(pl.Id).Append(pl.Name).Append(pl.Current);
+            return sb.ToString();
+        }
+
+        /// <summary>Hotspot name and connected devices for the flyout (slow WinRT call, so in the background).</summary>
+        private void LoadHotspotInfo()
+        {
+            if (hotspotInfoLoading || !hotspot.Available || !settings.AutoHotspot || string.IsNullOrEmpty(settings.Ssid)) return;
+            hotspotInfoLoading = true;
+            string ssid = settings.Ssid;
+            Task.Factory.StartNew(() => hotspot.GetInfo(ssid)).ContinueWith(t => Post(() =>
+            {
+                hotspotInfoLoading = false;
+                if (!t.IsFaulted) hotspotInfo = t.Result;
+                UpdateWindowsSoon();
+            }));
+        }
+
+        /// <summary>Refresh an open flyout / settings window after the current event has finished.</summary>
+        private void UpdateWindowsSoon()
+        {
+            Post(() =>
+            {
+                if (flyout != null && !flyout.IsDisposed && flyout.Visible)
+                {
+                    FlyoutModel m = BuildFlyoutModel();
+                    string sig = Signature(m);
+                    if (sig != flyoutSignature) { flyoutSignature = sig; flyout.UpdateModel(m); }
+                }
+                if (settingsWindow != null && !settingsWindow.IsDisposed) settingsWindow.RefreshFromHost();
+            });
+        }
+
+        private void SaveDiagnostics() { SaveDiagnostics(null); }
+
+        private void SaveDiagnostics(IWin32Window owner)
         {
             string report;
             try { report = Diagnostics.Build(wifi, settings, hotspot.Available); }
@@ -644,26 +848,13 @@ namespace WiPass.UI
                 InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)
             })
             {
-                if (dlg.ShowDialog() != DialogResult.OK) return;
+                if (dlg.ShowDialog(owner) != DialogResult.OK) return;
                 File.WriteAllText(dlg.FileName, report, new UTF8Encoding(true));
-                MessageBox.Show("저장했습니다.\r\n\r\n비밀번호는 들어 있지 않습니다. 기록에 장소 이름이 나올 수 있으니, 올리기 전에 한 번 열어 확인해 주세요.\r\n" +
+                MessageBox.Show(owner, "저장했습니다.\r\n\r\n비밀번호는 들어 있지 않습니다. 기록에 장소 이름이 나올 수 있으니, 올리기 전에 한 번 열어 확인해 주세요.\r\n" +
                                 "GitHub 문의(Issues)에 이 파일을 첨부해 주시면 원인을 찾는 데 큰 도움이 됩니다.",
                                 AppInfo.Name, MessageBoxButtons.OK, MessageBoxIcon.Information);
                 try { Process.Start("explorer.exe", "/select,\"" + dlg.FileName + "\""); } catch { }
             }
-        }
-
-        private void ShowAbout()
-        {
-            MessageBox.Show(
-                AppInfo.DisplayName + "  " + AppInfo.Version + "\r\n" +
-                AppInfo.Tagline + "\r\n\r\n" +
-                "제작: " + AppInfo.Author + " (" + AppInfo.AuthorNote + ")\r\n" +
-                AppInfo.RepoUrl + "\r\n\r\n" +
-                "MIT 라이선스로 무료 배포되는 프로그램이며, 어떠한 보증도 하지 않습니다.\r\n" +
-                "사용에 따른 책임은 사용자에게 있습니다.\r\n" +
-                "WiPass는 인터넷으로 아무 정보도 보내지 않습니다.",
-                AppInfo.Name + " 정보", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         private static void OpenUri(string uri)

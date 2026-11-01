@@ -9,6 +9,15 @@ namespace WiPass.Wifi
 {
     internal enum HotspotState { Unavailable, Off, On, InTransition }
 
+    internal sealed class HotspotInfo
+    {
+        public HotspotState State;
+        /// <summary>Connected devices, or -1 when unknown / hotspot off.</summary>
+        public int Clients;
+        /// <summary>The hotspot's own network name (what the phone sees), or null.</summary>
+        public string ApSsid;
+    }
+
     /// <summary>
     /// Windows "Mobile hotspot" (tethering) control through the WinRT
     /// NetworkOperatorTetheringManager API, called by reflection so the app
@@ -103,6 +112,46 @@ namespace WiPass.Wifi
                 Log.Warn("핫스팟 상태 확인 오류: " + Inner(ex).Message);
                 return HotspotState.Unavailable;
             }
+        }
+
+        /// <summary>State, connected devices and the hotspot's own network name (for the flyout and settings).</summary>
+        public HotspotInfo GetInfo(string ssid)
+        {
+            var info = new HotspotInfo { State = HotspotState.Unavailable, Clients = -1 };
+            if (!Available) return info;
+            try
+            {
+                object tm = GetManager(ssid);
+                if (tm != null)
+                {
+                    Type t = tm.GetType();
+                    string s = t.GetProperty("TetheringOperationalState").GetValue(tm, null).ToString();
+                    info.State = s == "On" ? HotspotState.On : s == "InTransition" ? HotspotState.InTransition : HotspotState.Off;
+                    if (info.State == HotspotState.On)
+                        info.Clients = Convert.ToInt32(t.GetProperty("ClientCount").GetValue(tm, null));
+                }
+                else
+                {
+                    // Not on the school network: still show the hotspot name from any connection.
+                    object profile = networkInformation.GetMethod("GetInternetConnectionProfile").Invoke(null, null);
+                    if (profile != null)
+                    {
+                        MethodInfo create = tetheringManager.GetMethods(BindingFlags.Public | BindingFlags.Static)
+                            .First(m => m.Name == "CreateFromConnectionProfile" && m.GetParameters().Length == 1);
+                        tm = create.Invoke(null, new[] { profile });
+                    }
+                }
+                if (tm != null)
+                {
+                    object cfg = tm.GetType().GetMethod("GetCurrentAccessPointConfiguration", Type.EmptyTypes).Invoke(tm, null);
+                    if (cfg != null) info.ApSsid = Convert.ToString(cfg.GetType().GetProperty("Ssid").GetValue(cfg, null));
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("핫스팟 정보 확인 오류: " + Inner(ex).Message);
+            }
+            return info;
         }
 
         /// <summary>Turns the hotspot on (restarting it first if <paramref name="restart"/>). Returns an error message or null.</summary>
