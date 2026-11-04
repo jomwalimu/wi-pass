@@ -45,7 +45,7 @@ namespace WiPass.UI
         private int page = -1;
         private string placesSignature;
         private bool? locationShown;
-        private FLabel hsName, hsClients;
+        private FLabel hsName, hsState;
         private bool hotspotPending;
         private string optionsSignature;
 
@@ -401,9 +401,9 @@ namespace WiPass.UI
                 open.Location = new Point(inner - open.Width - Fx.S(14), cy + (rowH - open.Height) / 2);
                 open.Click += (s, e) => Open("ms-settings:network-mobilehotspot");
                 hsName = new FLabel("핫스팟 이름 확인 중…", Fx.Font(14), p.Text) { Location = new Point(Fx.S(50), cy + Fx.S(13)), Width = open.Left - Fx.S(62) };
-                hsClients = new FLabel("이름과 비밀번호는 윈도우 설정에서 정해요", Fx.Font(12), p.SubText) { Location = new Point(Fx.S(50), hsName.Bottom + Fx.S(1)), Width = open.Left - Fx.S(62) };
+                hsState = new FLabel("이름과 비밀번호는 윈도우 설정에서 정해요", Fx.Font(12), p.SubText) { Location = new Point(Fx.S(50), hsName.Bottom + Fx.S(1)), Width = open.Left - Fx.S(62) };
                 hcard.Controls.Add(hsName);
-                hcard.Controls.Add(hsClients);
+                hcard.Controls.Add(hsState);
                 hcard.Controls.Add(open);
                 cy += rowH;
                 LoadHotspotInfo();
@@ -439,11 +439,11 @@ namespace WiPass.UI
             if (hsName == null || hsName.IsDisposed) return;
             hsName.Text = string.IsNullOrEmpty(info.ApSsid) ? "노트북 핫스팟" : "핫스팟 이름: " + info.ApSsid;
             string state;
-            if (info.State == HotspotState.On) state = "켜짐" + (info.Clients >= 0 ? " · 기기 " + info.Clients + "대 연결" : "");
+            if (info.State == HotspotState.On) state = "켜짐 · 스마트폰에서 이 이름으로 연결하세요";
             else if (info.State == HotspotState.InTransition) state = "켜는 중";
             else if (info.State == HotspotState.Off) state = "꺼짐";
             else state = "학교 와이파이에 연결되면 켤 수 있어요";
-            hsClients.Text = state;
+            hsState.Text = state;
         }
 
         // ------------------------------------------------------------------ 정보·문의

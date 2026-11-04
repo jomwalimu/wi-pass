@@ -40,6 +40,15 @@ namespace WiPass.UI
         private FlyoutModel model;
         private DateTime hiddenAt = DateTime.MinValue;
 
+        // Controls that change while the flyout is open (updated in place, never rebuilt,
+        // so a click on a tile or toggle keeps focus and the flyout stays open).
+        private FIcon statusBadge;
+        private FLabel statusTitle, statusSub, hotspotSub, footText;
+        private FCard statusCard;
+        private readonly List<FPlaceTile> tiles = new List<FPlaceTile>();
+        private FToggle autoToggle, hotspotToggle;
+        private bool updating;
+
         public event Action<string> SwitchRequested;
         public event Action<bool> AutoSwitchChanged;
         public event Action<bool> HotspotChanged;
@@ -77,10 +86,22 @@ namespace WiPass.UI
         /// <summary>True for a moment after the flyout closed by losing focus (so a tray click toggles it).</summary>
         public bool JustHidden { get { return (DateTime.UtcNow - hiddenAt).TotalMilliseconds < 400; } }
 
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
         protected override void OnDeactivate(EventArgs e)
         {
             base.OnDeactivate(e);
-            HideFlyout();
+            // Close only when the user really moved on (clicked elsewhere, another window came up).
+            // Check a moment later: Windows may briefly report deactivation while we update ourselves.
+            BeginInvoke((Action)(() =>
+            {
+                if (!Visible) return;
+                IntPtr fg = IntPtr.Zero;
+                try { fg = GetForegroundWindow(); } catch { }
+                if (fg == Handle) return;
+                HideFlyout();
+            }));
         }
 
         protected override void OnKeyDown(KeyEventArgs e)
@@ -108,13 +129,66 @@ namespace WiPass.UI
         public void UpdateModel(FlyoutModel m)
         {
             if (!Visible) return;
+            if (SameLayout(model, m)) { Apply(m); return; }
+
+            // The list of places changed: rebuild, then keep the flyout active with the same focus.
             Control focused = ActiveControl;
             string focusName = focused != null ? focused.AccessibleName : null;
             Build(m);
             PlaceNearTray();
+            Activate();
             if (focusName != null)
                 foreach (Control c in AllControls(this))
                     if (c.CanFocus && c.AccessibleName == focusName) { c.Focus(); break; }
+        }
+
+        private static bool SameLayout(FlyoutModel a, FlyoutModel b)
+        {
+            if (a == null || a.Configured != b.Configured || a.HotspotAvailable != b.HotspotAvailable) return false;
+            if (string.IsNullOrEmpty(a.HotspotDetail) != string.IsNullOrEmpty(b.HotspotDetail)) return false;
+            if (a.Places.Count != b.Places.Count) return false;
+            for (int i = 0; i < a.Places.Count; i++)
+                if (a.Places[i].Id != b.Places[i].Id || a.Places[i].Name != b.Places[i].Name) return false;
+            return true;
+        }
+
+        /// <summary>Updates texts, icons, checks and toggles without recreating controls.</summary>
+        private void Apply(FlyoutModel m)
+        {
+            model = m;
+            Ico icon; Color iconColor, circle;
+            StatusLook(m.State, out icon, out iconColor, out circle);
+            statusBadge.Icon = icon; statusBadge.Color = iconColor; statusBadge.Circle = circle; statusBadge.Invalidate();
+            statusTitle.Text = m.Title ?? "";
+            statusSub.Text = m.Subtitle ?? "";
+            statusCard.AccessibleName = (m.Title ?? "") + " " + (m.Subtitle ?? "");
+            for (int i = 0; i < tiles.Count && i < m.Places.Count; i++)
+            {
+                FPlaceTile t = tiles[i];
+                t.Current = m.Places[i].Current;
+                t.AccessibleName = m.Places[i].Name + (t.Current ? " (현재 장소)" : "");
+                t.Invalidate();
+            }
+            updating = true;
+            try
+            {
+                if (autoToggle != null) autoToggle.Checked = m.AutoSwitch;
+                if (hotspotToggle != null) hotspotToggle.Checked = m.AutoHotspot;
+            }
+            finally { updating = false; }
+            if (hotspotSub != null) hotspotSub.Text = m.HotspotDetail ?? "";
+            if (footText != null) footText.Text = m.Footer ?? "";
+        }
+
+        private void StatusLook(TrayState state, out Ico icon, out Color iconColor, out Color circle)
+        {
+            switch (state)
+            {
+                case TrayState.Connected: icon = Ico.Check; iconColor = p.Accent; circle = p.AccentSoft; break;
+                case TrayState.Busy: icon = Ico.Refresh; iconColor = p.WarnText; circle = p.WarnBg; break;
+                case TrayState.Failed: icon = Ico.Warning; iconColor = p.Danger; circle = Fx.Blend(p.Card, p.Danger, 0.12f); break;
+                default: icon = Ico.Wifi; iconColor = p.SubText; circle = p.Hover; break;
+            }
         }
 
         private static IEnumerable<Control> AllControls(Control root)
@@ -164,18 +238,14 @@ namespace WiPass.UI
             // status card
             var status = new FCard(p) { Location = new Point(pad, y), Size = new Size(W - pad * 2, Fx.S(76)) };
             Ico icon; Color iconColor, circle;
-            switch (m.State)
-            {
-                case TrayState.Connected: icon = Ico.Check; iconColor = p.Accent; circle = p.AccentSoft; break;
-                case TrayState.Busy: icon = Ico.Refresh; iconColor = p.WarnText; circle = p.WarnBg; break;
-                case TrayState.Failed: icon = Ico.Warning; iconColor = p.Danger; circle = Fx.Blend(p.Card, p.Danger, 0.12f); break;
-                default: icon = Ico.Wifi; iconColor = p.SubText; circle = p.Hover; break;
-            }
+            StatusLook(m.State, out icon, out iconColor, out circle);
             var badge = new FIcon(icon, iconColor, Fx.S(44)) { Circle = circle, Stroke = 2.2f, Location = new Point(Fx.S(16), Fx.S(16)) };
             var title = new FLabel(m.Title ?? "", Fx.Font(20, FontStyle.Bold), p.Text) { Location = new Point(Fx.S(74), Fx.S(13)), Width = status.Width - Fx.S(90) };
             var sub = new FLabel(m.Subtitle ?? "", Fx.Font(13), p.SubText) { Location = new Point(Fx.S(74), Fx.S(44)), Width = status.Width - Fx.S(90) };
             status.Controls.Add(badge); status.Controls.Add(title); status.Controls.Add(sub);
             status.AccessibleName = (m.Title ?? "") + " " + (m.Subtitle ?? "");
+            statusCard = status; statusBadge = badge; statusTitle = title; statusSub = sub;
+            tiles.Clear(); autoToggle = null; hotspotToggle = null; hotspotSub = null;
             Controls.Add(status);
             y += status.Height + Fx.S(16);
 
@@ -194,12 +264,12 @@ namespace WiPass.UI
                     {
                         BackColor = p.Window,
                         Width = tileW,
-                        Enabled = !m.Busy,
                         Location = new Point(pad + (i % 2) * (tileW + gap), y + (i / 2) * (Fx.S(44) + gap))
                     };
                     string id = place.Id;
                     tile.Click += (s, e) => { var h = SwitchRequested; if (h != null) h(id); };
                     Controls.Add(tile);
+                    tiles.Add(tile);
                 }
                 int rows = (m.Places.Count + 1) / 2;
                 y += rows * Fx.S(44) + Math.Max(0, rows - 1) * gap + Fx.S(14);
@@ -210,7 +280,8 @@ namespace WiPass.UI
                 var autoLbl = new FLabel("도착하면 자동 전환", Fx.Font(14), p.Text) { Location = new Point(Fx.S(14), (rowH1 - Fx.S(20)) / 2) };
                 var autoTgl = new FToggle(p, "도착하면 자동 전환") { Checked = m.AutoSwitch };
                 autoTgl.Location = new Point(toggles.Width - autoTgl.Width - Fx.S(12), (rowH1 - autoTgl.Height) / 2);
-                autoTgl.CheckedChanged += (s, e) => { var h = AutoSwitchChanged; if (h != null) h(autoTgl.Checked); };
+                autoTgl.CheckedChanged += (s, e) => { var h = AutoSwitchChanged; if (h != null && !updating) h(autoTgl.Checked); };
+                autoToggle = autoTgl;
                 toggles.Controls.Add(autoLbl); toggles.Controls.Add(autoTgl);
                 toggles.Dividers.Add(rowH1);
 
@@ -224,10 +295,12 @@ namespace WiPass.UI
                 {
                     var hsSub = new FLabel(m.HotspotDetail, Fx.Font(12), p.SubText) { Location = new Point(Fx.S(14), hsLbl.Bottom + Fx.S(1)), Width = toggles.Width - Fx.S(90) };
                     toggles.Controls.Add(hsSub);
+                    hotspotSub = hsSub;
                 }
                 var hsTgl = new FToggle(p, "노트북 핫스팟") { Checked = m.AutoHotspot, Enabled = m.HotspotAvailable };
                 hsTgl.Location = new Point(toggles.Width - hsTgl.Width - Fx.S(12), y2 + (rowH2 - hsTgl.Height) / 2);
-                hsTgl.CheckedChanged += (s, e) => { var h = HotspotChanged; if (h != null) h(hsTgl.Checked); };
+                hsTgl.CheckedChanged += (s, e) => { var h = HotspotChanged; if (h != null && !updating) h(hsTgl.Checked); };
+                hotspotToggle = hsTgl;
                 toggles.Controls.Add(hsTgl);
                 toggles.Height = rowH1 + rowH2;
                 Controls.Add(toggles);
@@ -253,6 +326,7 @@ namespace WiPass.UI
             open.Location = new Point(W - open.Width - Fx.S(12), (footer.Height - open.Height) / 2);
             open.Click += (s, e) => { HideFlyout(); Raise(SettingsRequested); };
             footer.Controls.Add(footText); footer.Controls.Add(open);
+            this.footText = footText;
             Controls.Add(footer);
 
             ClientSize = new Size(W, y + footer.Height);

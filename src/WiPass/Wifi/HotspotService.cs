@@ -12,8 +12,6 @@ namespace WiPass.Wifi
     internal sealed class HotspotInfo
     {
         public HotspotState State;
-        /// <summary>Connected devices, or -1 when unknown / hotspot off.</summary>
-        public int Clients;
         /// <summary>The hotspot's own network name (what the phone sees), or null.</summary>
         public string ApSsid;
     }
@@ -114,10 +112,10 @@ namespace WiPass.Wifi
             }
         }
 
-        /// <summary>State, connected devices and the hotspot's own network name (for the flyout and settings).</summary>
+        /// <summary>State and the hotspot's own network name (for the flyout and settings).</summary>
         public HotspotInfo GetInfo(string ssid)
         {
-            var info = new HotspotInfo { State = HotspotState.Unavailable, Clients = -1 };
+            var info = new HotspotInfo { State = HotspotState.Unavailable };
             if (!Available) return info;
             try
             {
@@ -127,8 +125,6 @@ namespace WiPass.Wifi
                     Type t = tm.GetType();
                     string s = t.GetProperty("TetheringOperationalState").GetValue(tm, null).ToString();
                     info.State = s == "On" ? HotspotState.On : s == "InTransition" ? HotspotState.InTransition : HotspotState.Off;
-                    if (info.State == HotspotState.On)
-                        info.Clients = Convert.ToInt32(t.GetProperty("ClientCount").GetValue(tm, null));
                 }
                 else
                 {

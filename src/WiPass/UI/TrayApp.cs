@@ -216,7 +216,12 @@ namespace WiPass.UI
 
         private void SwitchTo(Place place)
         {
-            if (busy) { Notify("전환 중입니다", "진행 중인 전환이 끝난 뒤 다시 시도해 주세요.", NoticeKind.Info); return; }
+            if (busy)
+            {
+                // The flyout already shows "연결 중"; a toast would only cover it.
+                if (!FlyoutVisible) Notify("전환 중입니다", "진행 중인 전환이 끝난 뒤 다시 시도해 주세요.", NoticeKind.Info);
+                return;
+            }
             if (!place.HasPassword) { OpenSettings(); return; }
             StartSwitch(new List<Place> { place }, false);
         }
@@ -608,8 +613,12 @@ namespace WiPass.UI
             tray.Text = tip.Length > 63 ? tip.Substring(0, 63) : tip;
         }
 
+        private bool FlyoutVisible { get { return flyout != null && !flyout.IsDisposed && flyout.Visible; } }
+
         private void Notify(string title, string text, NoticeKind kind, Action onClick = null, params NoticeButton[] buttons)
         {
+            // While the flyout is open it shows the same news, and a toast would pop up right on top of it.
+            if (kind == NoticeKind.Info && FlyoutVisible) return;
             notifier.Show(title, text, kind, onClick, buttons);
         }
 
@@ -788,7 +797,6 @@ namespace WiPass.UI
             {
                 m.HotspotDetail = "켜짐";
                 if (hotspotInfo != null && !string.IsNullOrEmpty(hotspotInfo.ApSsid)) m.HotspotDetail += " · " + hotspotInfo.ApSsid;
-                if (hotspotInfo != null && hotspotInfo.Clients >= 0) m.HotspotDetail += " · 기기 " + hotspotInfo.Clients + "대";
             }
             else m.HotspotDetail = currentState == TrayState.Connected ? "켜는 중이거나 꺼져 있어요" : "학교 와이파이에 연결되면 켜요";
             return m;
