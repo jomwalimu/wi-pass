@@ -34,6 +34,15 @@ namespace WiPass.Wifi
     {
         private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(20);
         private const int MaxAttemptFailures = 3;
+
+        // Some Wi-Fi drivers (seen: Intel Netwaw18.sys, stop code 0xD1) crash Windows when connect /
+        // disconnect / profile changes arrive back to back. Keep a quiet gap between radio operations,
+        // and never tear down a connection attempt that has only just started.
+        private static readonly TimeSpan QuietGap = TimeSpan.FromSeconds(3);
+        private static readonly TimeSpan MinAttemptAge = TimeSpan.FromSeconds(1.5);
+        private static readonly TimeSpan DisconnectWait = TimeSpan.FromSeconds(5);
+        private const int IF_DISCONNECTING = 3, IF_DISCONNECTED = 4, IF_ASSOCIATING = 5, IF_DISCOVERING = 6, IF_AUTHENTICATING = 7;
+        private static DateTime quietUntilUtc = DateTime.MinValue;
         private readonly WifiService wifi;
 
         public Switcher(WifiService wifi) { this.wifi = wifi; }
@@ -47,7 +56,7 @@ namespace WiPass.Wifi
         public SwitchResult Run(SwitchRequest req, CancellationToken cancel)
         {
             var res = new SwitchResult();
-            if (cancel.IsCancellationRequested) return Cancelled(res, req, null);
+            if (cancel.IsCancellationRequested) return Cancelled(res, req, null, DateTime.MinValue);
             Log.Info("전환 시작: " + req.PlaceName);
 
             WifiInterface itf;
@@ -110,7 +119,24 @@ namespace WiPass.Wifi
                 xml = ProfileBuilder.Create(req.Ssid, auth, cipher, password);
             }
 
-            if (cancel.IsCancellationRequested) return Cancelled(res, req, null);
+            if (cancel.IsCancellationRequested) return Cancelled(res, req, null, DateTime.MinValue);
+
+            // Let the adapter rest after the previous operation (rapid taps end up here and are cancelled harmlessly).
+            TimeSpan rest = quietUntilUtc - DateTime.UtcNow;
+            if (rest > TimeSpan.Zero)
+            {
+                Log.Info("무선랜 장치 안정 대기 " + (int)rest.TotalMilliseconds + "ms");
+                if (cancel.WaitHandle.WaitOne(rest)) return Cancelled(res, req, null, DateTime.MinValue);
+            }
+            // Windows is in the middle of its own connection attempt: stop it cleanly first.
+            int st = InterfaceState(g);
+            if (st == IF_ASSOCIATING || st == IF_DISCOVERING || st == IF_AUTHENTICATING || st == IF_DISCONNECTING)
+            {
+                Log.Info("진행 중인 연결을 먼저 정리");
+                if (st != IF_DISCONNECTING) wifi.Disconnect(g);
+                WaitDisconnected(g);
+                if (cancel.WaitHandle.WaitOne(1000)) { MarkQuiet(); return Cancelled(res, req, null, DateTime.MinValue); }
+            }
 
             // 4. Forget the old setting(s)
             foreach (var p in existing)
@@ -142,6 +168,7 @@ namespace WiPass.Wifi
             uint finalReason = 0, lastFailReason = 0;
             int failCount = 0;
             DateTime started = DateTime.UtcNow;
+            MarkQuiet();
             using (var done = new ManualResetEventSlim(false))
             {
                 Action<Guid, uint, uint, string> handler = (ig, code, rc, profile) =>
@@ -173,7 +200,8 @@ namespace WiPass.Wifi
                 }
                 finally { wifi.AcmNotification -= handler; }
             }
-            if (cancel.IsCancellationRequested) return Cancelled(res, req, g);
+            if (cancel.IsCancellationRequested) return Cancelled(res, req, g, started);
+            MarkQuiet();
 
             CurrentConnection cur = wifi.GetCurrent(g);
             bool connected = cur != null && cur.State == WlanNative.STATE_CONNECTED && cur.ProfileName == req.Ssid;
@@ -183,6 +211,8 @@ namespace WiPass.Wifi
             {
                 // Stop Windows from retrying in the background with the wrong password.
                 wifi.Disconnect(g);
+                WaitDisconnected(g);
+                MarkQuiet();
                 uint why = finalReason != 0 ? finalReason : lastFailReason;
                 string detail = WifiService.ReasonText(why);
                 Log.Warn("접속 실패(" + seconds + "초, " + (securityFailed ? "비밀번호 오류 추정" : completed ? "완료 보고" : "시간 초과") + "): " + detail);
@@ -194,7 +224,7 @@ namespace WiPass.Wifi
             Log.Info("접속까지 " + seconds + "초");
 
             // 7. Remember which access points belong to this place (used for automatic detection)
-            if (cancel.WaitHandle.WaitOne(1500)) return Cancelled(res, req, null); // connected, but another place was picked
+            if (cancel.WaitHandle.WaitOne(1500)) return Cancelled(res, req, null, DateTime.MinValue); // connected, but another place was picked
             cur = wifi.GetCurrent(g);
             if (cur != null && cur.Bssid != null) res.SeenBssids.Add(cur.Bssid);
             try
@@ -220,20 +250,47 @@ namespace WiPass.Wifi
             return reason >= 0x40000 && reason < 0x50000;
         }
 
-        private SwitchResult Cancelled(SwitchResult res, SwitchRequest req, Guid? disconnect)
+        private SwitchResult Cancelled(SwitchResult res, SwitchRequest req, Guid? disconnect, DateTime connectedAt)
         {
             Log.Info("전환 취소: " + req.PlaceName + " (다른 장소를 골라서)");
             if (disconnect.HasValue)
             {
-                // Stop Windows' attempt with this password, and let its last notices arrive
-                // before the next place starts, so they are not mistaken for the next attempt's.
-                try { wifi.Disconnect(disconnect.Value); } catch { }
-                Thread.Sleep(700);
+                // Stop Windows' attempt with this password — but not in the very first moments of
+                // the attempt, and wait until the adapter has really let go before the next place.
+                TimeSpan age = DateTime.UtcNow - connectedAt;
+                if (age < MinAttemptAge) Thread.Sleep(MinAttemptAge - age);
+                try { wifi.Disconnect(disconnect.Value); WaitDisconnected(disconnect.Value); } catch { }
+                MarkQuiet();
             }
             res.Success = false;
             res.Cancelled = true;
             res.Message = "취소됨";
             return res;
+        }
+
+        private static void MarkQuiet() { quietUntilUtc = DateTime.UtcNow + QuietGap; }
+
+        private int InterfaceState(Guid g)
+        {
+            try
+            {
+                foreach (var i in wifi.GetInterfaces()) if (i.Id == g) return i.State;
+            }
+            catch { }
+            return -1;
+        }
+
+        /// <summary>Waits (up to a few seconds) until the adapter reports it is no longer connected or connecting.</summary>
+        private void WaitDisconnected(Guid g)
+        {
+            DateTime until = DateTime.UtcNow + DisconnectWait;
+            while (DateTime.UtcNow < until)
+            {
+                int st = InterfaceState(g);
+                if (st == IF_DISCONNECTED || st == 0 || st == -1) return;
+                Thread.Sleep(200);
+            }
+            Log.Warn("연결 해제 확인 시간 초과");
         }
 
         private static SwitchResult Fail(SwitchResult res, string message)

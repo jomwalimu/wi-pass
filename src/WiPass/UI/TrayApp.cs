@@ -229,7 +229,7 @@ namespace WiPass.UI
                 if (pendingSwitch != null ? pendingSwitch.Id == place.Id : switchingPlaceId == place.Id) return;
                 pendingSwitch = place;
                 if (switchCancel != null) switchCancel.Cancel();
-                SetState(TrayState.Busy, place.Name + " 비밀번호로 접속 중...", Josa.WithRo(place.Name) + " 바꾸는 중", "하던 연결을 멈추고 새로 연결하고 있어요");
+                SetState(TrayState.Busy, place.Name + " 비밀번호로 접속 중...", Josa.WithRo(place.Name) + " 바꾸는 중", "하던 연결을 정리하고 몇 초 뒤 새로 연결해요");
                 return;
             }
             StartSwitch(new List<Place> { place }, false);
