@@ -212,7 +212,7 @@ namespace WiPass.UI
         {
             var sb = new StringBuilder(settings.Ssid).Append('|').Append(host.ConnectedPlaceId);
             foreach (var pl in settings.Places)
-                sb.Append('|').Append(pl.Id).Append(pl.Name).Append(pl.Bssids != null ? pl.Bssids.Count : 0).Append(Ago(pl.LastUsedUtc));
+                sb.Append('|').Append(pl.Id).Append(pl.Name).Append(Ago(pl.LastUsedUtc));
             return sb.ToString();
         }
 
@@ -276,12 +276,11 @@ namespace WiPass.UI
                 if (now)
                     card.Controls.Add(new Badge(p, "지금 여기") { Location = new Point(name.Right + Fx.S(8), Fx.S(14)) });
 
-                int aps = place.Bssids != null ? place.Bssids.Count : 0;
                 string ago = Ago(place.LastUsedUtc);
                 string meta;
                 if (!place.HasPassword) meta = "비밀번호를 넣어 주세요";
-                else if (aps == 0 && ago == null) meta = "비밀번호 저장됨 · 처음 연결하면 공유기를 알아 둡니다";
-                else meta = "공유기 " + aps + "대 알아 둠" + (ago != null ? " · " + ago + " 연결" : "");
+                else if (ago == null) meta = "비밀번호 저장됨 · 아직 연결한 적 없음";
+                else meta = "비밀번호 저장됨 · " + ago + " 연결";
                 card.Controls.Add(new FLabel(meta, Fx.Font(12), place.HasPassword ? p.SubText : p.Danger) { Location = new Point(Fx.S(66), Fx.S(37)), Width = edit.Left - Fx.S(76) });
                 card.Controls.Add(edit);
                 card.Controls.Add(del);
@@ -289,7 +288,7 @@ namespace WiPass.UI
                 y += card.Height + Fx.S(8);
             }
 
-            var note = new FLabel("도착하면 알아 둔 공유기가 보이는 장소부터, 그다음 최근에 연결한 순서로 시도합니다.", Fx.Font(12), p.SubText, true)
+            var note = new FLabel("처음 가는 장소에서는 저장된 비밀번호를 차례로 시도하고, 한 번 연결되면 다음부터는 바로 알아봅니다.", Fx.Font(12), p.SubText, true)
             { BackColor = p.Window, Location = new Point(cx + Fx.S(2), y + Fx.S(6)), Width = inner };
             note.FitHeight();
             pg.Controls.Add(note);

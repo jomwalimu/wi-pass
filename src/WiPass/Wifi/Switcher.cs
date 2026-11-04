@@ -21,6 +21,8 @@ namespace WiPass.Wifi
         public string NewTemplate;
         public List<string> SeenBssids = new List<string>();
         public bool LocationDenied;
+        /// <summary>Stopped because the user picked another place meanwhile.</summary>
+        public bool Cancelled;
     }
 
     /// <summary>
@@ -36,9 +38,16 @@ namespace WiPass.Wifi
 
         public Switcher(WifiService wifi) { this.wifi = wifi; }
 
-        public SwitchResult Run(SwitchRequest req)
+        public SwitchResult Run(SwitchRequest req) { return Run(req, CancellationToken.None); }
+
+        /// <summary>
+        /// <paramref name="cancel"/> stops the attempt (e.g. the user tapped the wrong place and then the right one):
+        /// the wait for Windows ends at once and the half-finished connection is dropped.
+        /// </summary>
+        public SwitchResult Run(SwitchRequest req, CancellationToken cancel)
         {
             var res = new SwitchResult();
+            if (cancel.IsCancellationRequested) return Cancelled(res, req, null);
             Log.Info("전환 시작: " + req.PlaceName);
 
             WifiInterface itf;
@@ -101,6 +110,8 @@ namespace WiPass.Wifi
                 xml = ProfileBuilder.Create(req.Ssid, auth, cipher, password);
             }
 
+            if (cancel.IsCancellationRequested) return Cancelled(res, req, null);
+
             // 4. Forget the old setting(s)
             foreach (var p in existing)
             {
@@ -157,10 +168,12 @@ namespace WiPass.Wifi
                 {
                     int cr = wifi.Connect(g, req.Ssid);
                     if (cr != 0) return Fail(res, "접속 요청을 보내지 못했습니다. " + WifiService.ErrorText(cr));
-                    done.Wait(ConnectTimeout);
+                    try { done.Wait(ConnectTimeout, cancel); }
+                    catch (OperationCanceledException) { }
                 }
                 finally { wifi.AcmNotification -= handler; }
             }
+            if (cancel.IsCancellationRequested) return Cancelled(res, req, g);
 
             CurrentConnection cur = wifi.GetCurrent(g);
             bool connected = cur != null && cur.State == WlanNative.STATE_CONNECTED && cur.ProfileName == req.Ssid;
@@ -181,7 +194,7 @@ namespace WiPass.Wifi
             Log.Info("접속까지 " + seconds + "초");
 
             // 7. Remember which access points belong to this place (used for automatic detection)
-            Thread.Sleep(1500);
+            if (cancel.WaitHandle.WaitOne(1500)) return Cancelled(res, req, null); // connected, but another place was picked
             cur = wifi.GetCurrent(g);
             if (cur != null && cur.Bssid != null) res.SeenBssids.Add(cur.Bssid);
             try
@@ -205,6 +218,22 @@ namespace WiPass.Wifi
         private static bool IsSecurityFailure(uint reason)
         {
             return reason >= 0x40000 && reason < 0x50000;
+        }
+
+        private SwitchResult Cancelled(SwitchResult res, SwitchRequest req, Guid? disconnect)
+        {
+            Log.Info("전환 취소: " + req.PlaceName + " (다른 장소를 골라서)");
+            if (disconnect.HasValue)
+            {
+                // Stop Windows' attempt with this password, and let its last notices arrive
+                // before the next place starts, so they are not mistaken for the next attempt's.
+                try { wifi.Disconnect(disconnect.Value); } catch { }
+                Thread.Sleep(700);
+            }
+            res.Success = false;
+            res.Cancelled = true;
+            res.Message = "취소됨";
+            return res;
         }
 
         private static SwitchResult Fail(SwitchResult res, string message)

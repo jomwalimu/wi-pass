@@ -3,12 +3,14 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using Microsoft.Win32;
 using WiPass.Core;
 using WiPass.Native;
 using WiPass.Wifi;
+using Timer = System.Windows.Forms.Timer;
 
 namespace WiPass.UI
 {
@@ -33,6 +35,9 @@ namespace WiPass.UI
 
         private AppSettings settings;
         private bool busy;
+        private CancellationTokenSource switchCancel;
+        private Place pendingSwitch;      // picked while another switch was running
+        private string switchingPlaceId;  // place being tried right now (background thread writes, UI reads)
         private bool hotspotBusy;
         private bool wizardOpen;
         private string statusText = "상태 확인 중...";
@@ -216,13 +221,17 @@ namespace WiPass.UI
 
         private void SwitchTo(Place place)
         {
+            if (!place.HasPassword) { OpenSettings(); return; }
             if (busy)
             {
-                // The flyout already shows "연결 중"; a toast would only cover it.
-                if (!FlyoutVisible) Notify("전환 중입니다", "진행 중인 전환이 끝난 뒤 다시 시도해 주세요.", NoticeKind.Info);
+                // Picked another place while connecting (e.g. tapped the wrong school first):
+                // stop the current attempt and go straight to the new place.
+                if (pendingSwitch != null ? pendingSwitch.Id == place.Id : switchingPlaceId == place.Id) return;
+                pendingSwitch = place;
+                if (switchCancel != null) switchCancel.Cancel();
+                SetState(TrayState.Busy, place.Name + " 비밀번호로 접속 중...", Josa.WithRo(place.Name) + " 바꾸는 중", "하던 연결을 멈추고 새로 연결하고 있어요");
                 return;
             }
-            if (!place.HasPassword) { OpenSettings(); return; }
             StartSwitch(new List<Place> { place }, false);
         }
 
@@ -237,12 +246,17 @@ namespace WiPass.UI
             public bool LocationDenied;
             public bool HotspotTried;
             public string HotspotError;
+            public bool Cancelled;
         }
 
         /// <summary>Tries the places in order on a background thread until one connects.</summary>
         private void StartSwitch(List<Place> candidates, bool automatic)
         {
             busy = true;
+            pendingSwitch = null;
+            var cts = new CancellationTokenSource();
+            switchCancel = cts;
+            CancellationToken cancel = cts.Token;
             var requests = new List<SwitchRequest>();
             var ids = new List<string>();
             foreach (var p in candidates)
@@ -264,27 +278,40 @@ namespace WiPass.UI
                     string label = (automatic ? "자동 전환: " : "") + req.PlaceName + " 비밀번호로 접속 중...";
                     string busyTitle = Josa.WithRo(req.PlaceName) + " 연결 중";
                     string busySub = automatic ? "도착한 장소를 확인해 자동으로 전환하고 있어요" : "저장된 비밀번호로 연결하고 있어요";
-                    Post(() => SetState(TrayState.Busy, label, busyTitle, busySub));
+                    if (cancel.IsCancellationRequested) { o.Cancelled = true; break; }
+                    string placeId = ids[i];
+                    Post(() => { if (!cancel.IsCancellationRequested) { switchingPlaceId = placeId; SetState(TrayState.Busy, label, busyTitle, busySub); } });
                     req.Template = tpl;
-                    SwitchResult r = switcher.Run(req);
+                    SwitchResult r = switcher.Run(req, cancel);
+                    if (r.Cancelled) { o.Cancelled = true; if (r.NewTemplate != null) o.NewTemplate = r.NewTemplate; break; }
                     o.Tried++;
                     if (r.NewTemplate != null) { tpl = r.NewTemplate; o.NewTemplate = tpl; }
                     if (r.LocationDenied) o.LocationDenied = true;
                     if (r.Success) { o.Success = r; o.PlaceId = ids[i]; o.PlaceName = req.PlaceName; break; }
                     o.LastFailure = r;
                 }
-                if (o.Success != null && withHotspot)
+                if (o.Success != null && withHotspot && !cancel.IsCancellationRequested)
                 {
                     o.HotspotTried = true;
                     o.HotspotError = hotspot.Start(ssid, true);
                 }
                 return o;
-            }).ContinueWith(t => Post(() => FinishSwitch(t, automatic)));
+            }).ContinueWith(t => Post(() => { cts.Dispose(); FinishSwitch(t, automatic); }));
         }
 
         private void FinishSwitch(Task<SwitchOutcome> t, bool automatic)
         {
             busy = false;
+            switchCancel = null;
+            switchingPlaceId = null;
+            if (pendingSwitch != null)
+            {
+                // Another place was picked meanwhile: forget this attempt and start that one.
+                Place next = settings.FindPlace(pendingSwitch.Id);
+                pendingSwitch = null;
+                if (!t.IsFaulted && t.Result.NewTemplate != null) settings.ProfileTemplate = t.Result.NewTemplate;
+                if (next != null && next.HasPassword) { StartSwitch(new List<Place> { next }, false); return; }
+            }
             if (t.IsFaulted)
             {
                 Exception ex = t.Exception.GetBaseException();
@@ -295,6 +322,7 @@ namespace WiPass.UI
 
             SwitchOutcome o = t.Result;
             if (o.NewTemplate != null) settings.ProfileTemplate = o.NewTemplate;
+            if (o.Cancelled) { settings.Save(); RefreshStatus(); return; }
 
             if (o.Success != null)
             {
@@ -438,8 +466,7 @@ namespace WiPass.UI
                     Place place = p;
                     var item = Styled(new ToolStripMenuItem(Josa.WithRo(place.Name) + " 전환")
                     {
-                        Checked = current != null && current.Id == place.Id,
-                        Enabled = !busy
+                        Checked = current != null && current.Id == place.Id
                     });
                     item.Click += (s, e) => SwitchTo(place);
                     menu.Items.Add(item);
