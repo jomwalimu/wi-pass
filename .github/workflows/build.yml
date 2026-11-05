@@ -95,12 +95,71 @@ jobs:
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::Installer build failed"; exit 1 }
           Get-ChildItem dist
 
+      - name: Store package (MSIX)
+        shell: pwsh
+        run: |
+          # Builds two MSIX packages from the same WiPass.exe:
+          #   WiPass-Test-<v>.msix  test identity, signed with a throw-away certificate (this run only) for sideloading
+          #   WiPass-Store-<v>.msix Partner Center identity (store/identity.json), unsigned: the Store signs it
+          $v = "${{ steps.ver.outputs.version }}"
+          $parts = (($v -split '-')[0]).Split('.')
+          $pkgVersion = "$($parts[0]).$($parts[1]).$($env:GITHUB_RUN_NUMBER).0"   # always increasing for the Store
+          Write-Host "MSIX version: $pkgVersion"
+
+          $kits = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
+          $bin = Get-ChildItem $kits -Directory | Where-Object { $_.Name -match '^10\.' } | Sort-Object { [version]$_.Name } -Descending |
+                 ForEach-Object { Join-Path $_.FullName 'x64' } | Where-Object { Test-Path (Join-Path $_ 'makeappx.exe') } | Select-Object -First 1
+          if (-not $bin) { Write-Host "::error::Windows SDK (makeappx) not found"; exit 1 }
+          Write-Host "SDK tools: $bin"
+          $makeappx = Join-Path $bin 'makeappx.exe'; $makepri = Join-Path $bin 'makepri.exe'; $signtool = Join-Path $bin 'signtool.exe'
+
+          function Build-Msix($identity, $out) {
+            $layout = "dist/msix-layout"
+            if (Test-Path $layout) { Remove-Item $layout -Recurse -Force }
+            New-Item -ItemType Directory -Force "$layout/Assets" | Out-Null
+            Copy-Item src/WiPass/bin/Release/net48/WiPass.exe $layout/
+            if (Test-Path src/WiPass/bin/Release/net48/WiPass.exe.config) { Copy-Item src/WiPass/bin/Release/net48/WiPass.exe.config $layout/ }
+            Copy-Item store/Assets/*.png "$layout/Assets/"
+            $m = Get-Content store/AppxManifest.xml -Raw -Encoding UTF8
+            $m = $m.Replace('{{IdentityName}}', $identity.IdentityName).Replace('{{Publisher}}', [System.Security.SecurityElement]::Escape($identity.Publisher))
+            $m = $m.Replace('{{PublisherDisplayName}}', [System.Security.SecurityElement]::Escape($identity.PublisherDisplayName)).Replace('{{DisplayName}}', $identity.DisplayName).Replace('{{Version}}', $pkgVersion)
+            [System.IO.File]::WriteAllText((Resolve-Path $layout).Path + "\AppxManifest.xml", $m, (New-Object System.Text.UTF8Encoding($false)))
+
+            & $makepri createconfig /cf dist/priconfig.xml /dq ko-KR /pv 10.0.0 /o | Out-Null
+            & $makepri new /pr $layout /cf dist/priconfig.xml /mn "$layout/AppxManifest.xml" /of "$layout/resources.pri" /o
+            if ($LASTEXITCODE -ne 0) { Write-Host "::error::makepri failed"; exit 1 }
+            & $makeappx pack /d $layout /p $out /o
+            if ($LASTEXITCODE -ne 0) { Write-Host "::error::makeappx failed for $out"; exit 1 }
+          }
+
+          # --- test package (sideload) ---
+          $test = @{ IdentityName = 'jomwalimu.WiPass.Test'; Publisher = 'CN=WiPass Test'; PublisherDisplayName = 'jomwalimu'; DisplayName = '와이패스 (시험판)' }
+          Build-Msix $test "dist/WiPass-Test-$v.msix"
+          $cert = New-SelfSignedCertificate -Type Custom -Subject 'CN=WiPass Test' -KeyUsage DigitalSignature -KeyAlgorithm RSA -KeyLength 2048 `
+                    -FriendlyName 'WiPass test signing' -CertStoreLocation 'Cert:\CurrentUser\My' -NotAfter (Get-Date).AddDays(60) `
+                    -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3', '2.5.29.19={text}')
+          & $signtool sign /fd SHA256 /sha1 $cert.Thumbprint /s My "dist/WiPass-Test-$v.msix"
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::signing the test package failed"; exit 1 }
+          Export-Certificate -Cert $cert -FilePath "dist/WiPass-Test-$v.cer" | Out-Null
+
+          # --- Store package (needs the Partner Center identity) ---
+          $id = Get-Content store/identity.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ($id.IdentityName -and $id.Publisher) {
+            Build-Msix @{ IdentityName = $id.IdentityName; Publisher = $id.Publisher; PublisherDisplayName = $id.PublisherDisplayName; DisplayName = $id.DisplayName } "dist/WiPass-Store-$v.msix"
+          } else {
+            Write-Host "store/identity.json is not filled in yet: skipping the Store package"
+          }
+          Remove-Item dist/msix-layout -Recurse -Force
+          Get-ChildItem dist
+
       - uses: actions/upload-artifact@v4
         with:
           name: WiPass-${{ steps.ver.outputs.version }}
           path: |
             dist/WiPass-Setup-*.exe
             dist/WiPass-*-portable.zip
+            dist/WiPass-*.msix
+            dist/WiPass-Test-*.cer
 
       - name: Publish release (new VERSION on main)
         if: steps.ver.outputs.release == 'true'
@@ -111,7 +170,8 @@ jobs:
           $v = "${{ steps.ver.outputs.version }}"
           $pre = if ($v -match '-') { '--prerelease' } else { '' }
           $notes = if (Test-Path "docs/release-notes/$v.md") { "docs/release-notes/$v.md" } else { $null }
-          $ghArgs = @("release", "create", "v$v", "dist/WiPass-Setup-$v.exe", "dist/WiPass-$v-portable.zip", "--title", "WiPass $v", "--target", "$env:GITHUB_SHA")
+          $files = @("dist/WiPass-Setup-$v.exe", "dist/WiPass-$v-portable.zip") + (Get-ChildItem dist -Filter "WiPass-Test-$v.*" | ForEach-Object { $_.FullName })
+          $ghArgs = @("release", "create", "v$v") + $files + @("--title", "WiPass $v", "--target", "$env:GITHUB_SHA")
           if ($pre) { $ghArgs += $pre }
           if ($notes) { $ghArgs += @("--notes-file", $notes) } else { $ghArgs += @("--notes", "WiPass $v") }
           gh @ghArgs

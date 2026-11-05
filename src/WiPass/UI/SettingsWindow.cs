@@ -471,7 +471,7 @@ namespace WiPass.UI
             cy = 0;
             AddButtonRow(help, ref cy, "문의하기 (GitHub)", "버그 신고 · 기능 제안 · 질문", "열기", () => Open(AppInfo.IssuesUrl), true);
             AddButtonRow(help, ref cy, "문의용 진단 정보 저장", "비밀번호는 들어 있지 않아요 · 문의할 때 첨부해 주세요", "저장...", () => host.SaveDiagnostics(this), true);
-            AddButtonRow(help, ref cy, "기록 폴더", "와이패스가 남긴 동작 기록", "열기", () => { try { Directory.CreateDirectory(AppPaths.LogDir); } catch { } Open(AppPaths.LogDir); }, true);
+            AddButtonRow(help, ref cy, "기록 폴더", "와이패스가 남긴 동작 기록", "열기", () => { try { Directory.CreateDirectory(AppPaths.LogDir); } catch { } Open(AppPackage.RealAppDataPath(AppPaths.LogDir)); }, true);
             AddButtonRow(help, ref cy, "새 버전 확인", "GitHub 릴리스 페이지를 엽니다", "열기", () => Open(AppInfo.RepoUrl + "/releases"), false);
             help.Height = cy;
             pg.Controls.Add(help);

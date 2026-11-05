@@ -60,8 +60,9 @@ namespace WiPass.UI
 
             try
             {
+                bool packaged = AppPackage.IsPackaged;
                 string shortcut = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), ShortcutName);
-                if (!File.Exists(shortcut))
+                if (!packaged && !File.Exists(shortcut))
                 {
                     Log.Info("시작 메뉴 바로가기가 없어 기본 알림을 사용합니다 (압축판)");
                     return;
@@ -69,7 +70,10 @@ namespace WiPass.UI
                 Type manager = Type.GetType("Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType=WindowsRuntime", true);
                 xmlType = Type.GetType("Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom, ContentType=WindowsRuntime", true);
                 toastType = Type.GetType("Windows.UI.Notifications.ToastNotification, Windows.UI.Notifications, ContentType=WindowsRuntime", true);
-                notifier = manager.GetMethod("CreateToastNotifier", new[] { typeof(string) }).Invoke(null, new object[] { AppId });
+                // Store package: Windows knows the app ID from the package. GitHub installer: the Start menu shortcut's ID.
+                notifier = packaged
+                    ? manager.GetMethod("CreateToastNotifier", Type.EmptyTypes).Invoke(null, null)
+                    : manager.GetMethod("CreateToastNotifier", new[] { typeof(string) }).Invoke(null, new object[] { AppId });
                 toastReady = true;
             }
             catch (Exception ex)
@@ -165,6 +169,23 @@ namespace WiPass.UI
                     PropertyInfo prop = args.GetType().GetProperty("Arguments");
                     if (prop != null) arguments = prop.GetValue(args, null) as string;
                 }
+                HandleArguments(arguments);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("알림 클릭 처리 오류: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Runs the action for "id=…;b=…". Windows may report the same click twice (in-process event and a
+        /// new launch handed over by <see cref="SingleInstance"/>), so each notification acts only once.
+        /// Returns false when the notification is unknown (e.g. from before a restart).
+        /// </summary>
+        public bool HandleArguments(string arguments)
+        {
+            try
+            {
                 string id = null;
                 int button = -1;
                 foreach (string part in (arguments ?? "").Split(';'))
@@ -173,14 +194,16 @@ namespace WiPass.UI
                     else if (part.StartsWith("b=")) int.TryParse(part.Substring(2), out button);
                 }
                 Action[] list = null;
-                lock (actions) { if (id != null) actions.TryGetValue(id, out list); }
-                if (list == null) return;
+                lock (actions) { if (id != null && actions.TryGetValue(id, out list)) actions.Remove(id); }
+                if (list == null) return false;
                 Action a = button + 1 >= 0 && button + 1 < list.Length ? list[button + 1] : null;
                 if (a != null) post(a);
+                return true;
             }
             catch (Exception ex)
             {
                 Log.Warn("알림 클릭 처리 오류: " + ex.Message);
+                return false;
             }
         }
 

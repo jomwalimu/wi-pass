@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Microsoft Store (MSIX) package manifest for WiPass.
+  The values in {{ }} are filled in by the build (.github/workflows/build.yml):
+    store build: identity from Partner Center (store/identity.json)
+    test build:  a separate test identity, signed with a test certificate for sideloading
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap desktop rescap">
+
+  <Identity Name="{{IdentityName}}" Publisher="{{Publisher}}" Version="{{Version}}" ProcessorArchitecture="neutral" />
+
+  <Properties>
+    <DisplayName>{{DisplayName}}</DisplayName>
+    <PublisherDisplayName>{{PublisherDisplayName}}</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <Description>같은 이름 학교 와이파이를 장소마다 다른 비밀번호로 자동 전환합니다.</Description>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="ko-KR" />
+  </Resources>
+
+  <Applications>
+    <Application Id="WiPass" Executable="WiPass.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="{{DisplayName}}"
+        Description="같은 이름 학교 와이파이 자동 전환"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" ShortName="와이패스" />
+      </uap:VisualElements>
+      <Extensions>
+        <!-- "윈도우를 켤 때 와이패스 실행" (settings toggle uses Windows.ApplicationModel.StartupTask) -->
+        <desktop:Extension Category="windows.startupTask" Executable="WiPass.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="WiPassStartup" Enabled="true" DisplayName="와이패스" />
+        </desktop:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <!-- Classic desktop program (Windows Forms, Native Wi-Fi API) -->
+    <rescap:Capability Name="runFullTrust" />
+    <!-- Mobile hotspot control (NetworkOperatorTetheringManager) and Wi-Fi access -->
+    <DeviceCapability Name="wiFiControl" />
+    <!-- Windows 11 24H2+: nearby Wi-Fi / access point information requires location consent -->
+    <DeviceCapability Name="location" />
+  </Capabilities>
+</Package>

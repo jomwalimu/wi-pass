@@ -83,6 +83,7 @@ namespace WiPass.UI
             };
             tray.MouseUp += (s, e) => { if (e.Button == MouseButtons.Left) ToggleFlyout(); };
             notifier = new Notifier(tray, Post);
+            SingleInstance.Listen(msg => Post(() => OnLaunchedAgain(msg)));
 
             wifi.AcmNotification += (itf, code, reason, profile) =>
             {
@@ -103,7 +104,12 @@ namespace WiPass.UI
 
             // Keep the startup entry in line with the setting and the current exe location
             // (e.g. after moving from a portable folder to the installed one).
-            StartupManager.Apply(settings.StartWithWindows);
+            // Store version: respect it if the user switched WiPass off in Windows' startup apps list.
+            StartupManager.Apply(settings.StartWithWindows, () => Post(() =>
+            {
+                settings.StartWithWindows = false;
+                settings.Save();
+            }));
 
             Log.Info("WiPass " + AppInfo.Version + " 시작 (자동 전환 " + OnOff(settings.AutoSwitch) + ", 핫스팟 " + OnOff(settings.AutoHotspot) + ")");
             Post(() =>
@@ -111,10 +117,45 @@ namespace WiPass.UI
                 RefreshStatus();
                 if (!settings.IsConfigured) OpenSettings();
                 else EvaluateSoon(1500);
+                CheckLegacyInstall();
             });
         }
 
         private static string OnOff(bool b) { return b ? "켜짐" : "꺼짐"; }
+
+        private void StartupBlocked()
+        {
+            Post(() =>
+            {
+                Action open = () => OpenUri("ms-settings:startupapps");
+                Notify("자동 실행을 켜지 못했어요", "윈도우 '시작 앱' 목록에서 와이패스가 꺼져 있습니다.\r\n거기서 직접 켜 주세요.", NoticeKind.Warning,
+                    open, new NoticeButton("시작 앱 설정 열기", open));
+            });
+        }
+
+        /// <summary>Store version: the GitHub installer copy should be removed (both would try to run).</summary>
+        private void CheckLegacyInstall()
+        {
+            if (!AppPackage.IsPackaged || !AppPackage.LegacyInstallPresent) return;
+            Log.Info("예전 설치판(GitHub)이 남아 있음");
+            Action open = () => OpenUri("ms-settings:appsfeatures");
+            Notify("예전 설치판을 제거해 주세요",
+                "설정 > 앱에서 '와이패스 (WiPass)'를 제거하세요.\r\n데이터 삭제를 물으면 '아니요'를 고르면 장소가 그대로 남습니다.",
+                NoticeKind.Warning, open, new NoticeButton("설치된 앱 열기", open));
+        }
+
+        /// <summary>WiPass was started again while running: a notification click or a plain launch (show the quick panel).</summary>
+        private void OnLaunchedAgain(string args)
+        {
+            if (args != null && args.Contains("id="))
+            {
+                notifier.HandleArguments(args); // already handled in-process → ignored
+                return;
+            }
+            if (wizardOpen) return;
+            if (!settings.IsConfigured) OpenSettings();
+            else OpenFlyout();
+        }
 
         private void Post(Action a)
         {
@@ -492,7 +533,7 @@ namespace WiPass.UI
             help.DropDownItems.Add(Styled(MakeItem("모바일 핫스팟 설정 열기", () => OpenUri("ms-settings:network-mobilehotspot"))));
             help.DropDownItems.Add(new ToolStripSeparator());
             help.DropDownItems.Add(Styled(MakeItem("문의용 진단 정보 저장...", SaveDiagnostics)));
-            help.DropDownItems.Add(Styled(MakeItem("기록 폴더 열기", () => { Directory.CreateDirectory(AppPaths.LogDir); OpenUri(AppPaths.LogDir); })));
+            help.DropDownItems.Add(Styled(MakeItem("기록 폴더 열기", () => { Directory.CreateDirectory(AppPaths.LogDir); OpenUri(AppPackage.RealAppDataPath(AppPaths.LogDir)); })));
             help.DropDownItems.Add(Styled(MakeItem("문의하기 (GitHub)", () => OpenUri(AppInfo.IssuesUrl))));
             help.DropDownItems.Add(new ToolStripSeparator());
             help.DropDownItems.Add(Styled(MakeItem("와이패스 정보", () => OpenSettings(SettingsWindow.PageAbout))));
@@ -693,7 +734,7 @@ namespace WiPass.UI
                     {
                         settings = f.Result;
                         settings.Save();
-                        StartupManager.Apply(settings.StartWithWindows);
+                        StartupManager.Apply(settings.StartWithWindows, StartupBlocked);
                         Log.Info("처음 설정 완료: 장소 " + settings.Places.Count + "개, 자동 전환 " + OnOff(settings.AutoSwitch) +
                                  ", 자동 실행 " + OnOff(settings.StartWithWindows) + ", 핫스팟 " + OnOff(settings.AutoHotspot));
                         autoRetryAfter = DateTime.MinValue;
@@ -756,7 +797,7 @@ namespace WiPass.UI
                     AfterAutoSwitchChanged();
                     break;
                 case SettingChange.Startup:
-                    StartupManager.Apply(settings.StartWithWindows);
+                    StartupManager.Apply(settings.StartWithWindows, StartupBlocked);
                     Log.Info("윈도우 시작 시 실행 " + OnOff(settings.StartWithWindows));
                     break;
                 case SettingChange.Hotspot:
