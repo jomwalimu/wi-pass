@@ -103,7 +103,8 @@ jobs:
           #   WiPass-Store-<v>.msix Partner Center identity (store/identity.json), unsigned: the Store signs it
           $v = "${{ steps.ver.outputs.version }}"
           $parts = (($v -split '-')[0]).Split('.')
-          $pkgVersion = "$($parts[0]).$($parts[1]).$($env:GITHUB_RUN_NUMBER).0"   # always increasing for the Store
+          # The Store needs a first part above 0 and a last part of 0: 0.7.x -> 1.7.<run>.0, 1.0.x -> 1.100.<run>.0 (always increasing)
+          $pkgVersion = "1.$([int]$parts[0] * 100 + [int]$parts[1]).$($env:GITHUB_RUN_NUMBER).0"
           Write-Host "MSIX version: $pkgVersion"
 
           $kits = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
@@ -170,7 +171,7 @@ jobs:
           $v = "${{ steps.ver.outputs.version }}"
           $pre = if ($v -match '-') { '--prerelease' } else { '' }
           $notes = if (Test-Path "docs/release-notes/$v.md") { "docs/release-notes/$v.md" } else { $null }
-          $files = @("dist/WiPass-Setup-$v.exe", "dist/WiPass-$v-portable.zip") + (Get-ChildItem dist -Filter "WiPass-Test-$v.*" | ForEach-Object { $_.FullName })
+          $files = @("dist/WiPass-Setup-$v.exe", "dist/WiPass-$v-portable.zip") + (Get-ChildItem dist -Filter "WiPass-Test-$v.*" | ForEach-Object { $_.FullName }) + (Get-ChildItem dist -Filter "WiPass-Store-$v.msix" | ForEach-Object { $_.FullName })
           $ghArgs = @("release", "create", "v$v") + $files + @("--title", "WiPass $v", "--target", "$env:GITHUB_SHA")
           if ($pre) { $ghArgs += $pre }
           if ($notes) { $ghArgs += @("--notes-file", $notes) } else { $ghArgs += @("--notes", "WiPass $v") }

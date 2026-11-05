@@ -92,6 +92,6 @@ Full automatic switching needs several sites sharing one SSID, which a test lab 
 
 ## 6. 제출 순서
 1. 파트너 센터 → 와이패스 → **제출 시작**
-2. 가격 및 사용 가능 여부 → 속성 → 연령 등급 → **패키지**: `WiPass-Store-버전.msix` 업로드
+2. 가격 및 사용 가능 여부 → 속성 → 연령 등급 → **패키지**: GitHub 릴리스의 `WiPass-Store-버전.msix` 업로드 (서명 없는 파일이 맞습니다. 스토어가 서명합니다. 두 번 클릭해서 설치되지 않는 것도 정상)
 3. 스토어 등록 정보(한국어) → 제출 옵션(인증 참고 사항) → **스토어에 제출**
 4. 인증 결과 메일 (보통 1~3일). 반려되면 사유를 보내 주세요.
